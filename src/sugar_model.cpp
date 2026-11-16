@@ -218,14 +218,23 @@ uptake_structre nitrogen_uptake(double N,
   double mycelial_exploration = 0.5; // TODO: check numbers
 
   /*
-   * Equations from Franklin 2014
+   * Equations from Franklin 2014 (eqs 1-2, Methods S1). N here is Nav,
+   * soil N availability in g N m-3 (volumetric - a soil-volume basis,
+   * not an areal one), used as-is in the capacity equations below
+   * (matches Franklin's Nav exactly, no conversion needed). The final
+   * saturating step needs the *areal* quantity Nav*effective_soil_depth
+   * instead (Franklin's own d=0.25 m, boreal pine forest) - CASSIA used
+   * to drop this conversion entirely and reuse bare N there too (a real
+   * dimensional bug, found 2026-11-16 while checking these equations
+   * against the SI PDF - see manuscript/nitrogen_uptake Sect. 1/5).
    */
+  double effective_soil_depth = 0.25; // m, Franklin (2014) SI Table S1
 
   double ectomycorrhizal_uptake_capacity = mycorrhizal_biomass * (uptake_capacity_constant * N * mycelial_exploration)/(uptake_capacity_constant + N * mycelial_exploration);
-  double ectomycorrhizal_uptake = ectomycorrhizal_uptake_capacity * N / (ectomycorrhizal_uptake_capacity + N);
+  double ectomycorrhizal_uptake = ectomycorrhizal_uptake_capacity * (N * effective_soil_depth) / (ectomycorrhizal_uptake_capacity + N * effective_soil_depth);
 
   double root_uptake_capacity = root_biomass * (uptake_capacity_constant * N * root_exploration)/(uptake_capacity_constant + N * root_exploration);
-  double root_uptake = root_uptake_capacity * N / (root_uptake_capacity + N);
+  double root_uptake = root_uptake_capacity * (N * effective_soil_depth) / (root_uptake_capacity + N * effective_soil_depth);
 
   double ectomycorrhizal_transfer;
   if (mycorrhiza_passive) {
@@ -334,6 +343,7 @@ void sugar_model(int day,
                  double TAir,
                  double PAR,
                  double PF,
+                 double AvailableN,
 
                  CASSIA_parameters parameters,
                  CASSIA_common common,
@@ -858,7 +868,7 @@ void sugar_model(int day,
     if (nitrogen_change) {
       // UPTAKAE: TODO: root_biomass and mycorrhizal_biomass from last iteration
 
-      double N = 0.5;
+      double N = AvailableN;
       double mycorrhizal_nitrogen_demand = 0.2;
 
       uptake = nitrogen_uptake(N,
@@ -974,7 +984,7 @@ void sugar_model(int day,
         // surplus_sugar_all (computed above) in place of the organ-level
         // branch's per-organ export, since this pathway has nothing
         // equivalent to export from.
-        double N = 0.5;
+        double N = AvailableN;
         double mycorrhizal_nitrogen_demand = 0.2;
 
         uptake = nitrogen_uptake(N,

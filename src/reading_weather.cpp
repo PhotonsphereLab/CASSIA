@@ -28,6 +28,27 @@ weather_all readWeatherVariables(const Rcpp::DataFrame& weather, bool spp, bool 
   weatherVariables.Nitrogen.assign(n, 0.0);
   weatherVariables.PA.assign(n, 101325.0);
   weatherVariables.SWP.assign(n, 0.0);
+  // Daily soil N available for root/mycorrhizal uptake (sugar_model.cpp's
+  // nitrogen_uptake() call) - Franklin (2014)'s Nav, g N m-3 (volumetric,
+  // NOT per kg soil or per m2 ground - see nitrogen_uptake()'s own
+  // comment). Default 6.4 is Hyytiala real data, not a placeholder:
+  // mean total extractable soil N (NH4+NO3) over the 0-30 cm profile
+  // across 3 non-anomalous sampling dates, korhonen_mineral_N.csv
+  // ("g N /m2" rows, mineral_soil_0_10 + mineral_soil_10_30, excluding
+  // one ~7x-higher outlier date), divided by Franklin's own effective
+  // soil depth (0.25 m) - cross-checked against the same file's "mg/kg"
+  // mineral_soil rows times a plausible boreal podzol bulk density
+  // (0.3-1.4 g/cm3), which lands in the same single-digit g N/m3 range.
+  // This is a standing extractable-N concentration standing in for a
+  // true daily availability rate (no mineralisation-rate data exists
+  // locally) - an approximation, not a measured Nav; see
+  // manuscript/nitrogen_uptake Sect. 2/5 for the full derivation and
+  // this caveat. Runs that don't supply the AvailableN column now get
+  // this value instead of the old unsourced 0.5 placeholder.
+  weatherVariables.AvailableN.assign(n, 6.4);
+  if (weather.containsElementNamed("AvailableN")) {
+    weatherVariables.AvailableN = Rcpp::as<std::vector<double>>(weather["AvailableN"]);
+  }
 
   if (spp) {
     weatherVariables.Photosynthesis_IN = Rcpp::as<std::vector<double>>(weather["P"]);

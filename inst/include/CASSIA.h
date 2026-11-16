@@ -128,6 +128,7 @@ void sugar_model(int day,
                  double TAir,
                  double PAR,
                  double PF,
+                 double AvailableN,
 
                  CASSIA_parameters parameters,
                  CASSIA_common common,
@@ -385,6 +386,7 @@ struct weather_all {
   std::vector<double> Precip;
   std::vector<double> Photosynthesis_IN;
   std::vector<double> Nitrogen;
+  std::vector<double> AvailableN;
   std::vector<double> PAR;
   std::vector<double> CO2;
   std::vector<double> VPD;
