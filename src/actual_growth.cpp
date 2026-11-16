@@ -115,20 +115,36 @@ void actual_growth(int day,
   // Culmulative
   all_out.culm_growth.height[days_gone + day]   = all_out.culm_growth.height[index_ref] + tree_state.height;
 
-  // Root/mycorrhiza turnover (litter): same senescence SIGNAL as leaf
-  // area's cohort turnover (fAPAR_and_LAI.cpp, Tian 2021) - photosynthesis.fS,
-  // sticky once it first reaches 1.0 after day 50 (fS_reached_one_roots),
-  // tracking fS's own decline from then on. Deliberately NOT a literal
-  // copy of the needle formula though: that formula's flat (n_age-1)/n_age
-  // daily decay only stays sensible because it is paired with an equally
-  // large, phenology-driven regrowth term (f_modifer) that has no root
-  // equivalent here - transplanting it as-is would drain the pool during
-  // every zero-growth winter day. Using today's actual realized growth
-  // (tree_state.roots/.ecto, already correct - see the previous commit)
-  // as the replacement term instead, and turning the senescence signal
-  // into a DEGREE of senescence (1 - fS) so loss is ~0 except during the
-  // real autumn decline, scaled by a per-day rate derived from a
-  // turnover-time placeholder (see root_turnover_years below).
+  // day is 0-indexed here (day==0 is Jan 1); day_of_year is converted to
+  // the 1-indexed convention (1-366) the R-side fit used - shared by
+  // root_turnover's own fixed-window spread immediately below,
+  // leaf_mass_correction's needle litter, and cone_turnover's cone litter
+  // further down, none of which depend on either of the others being on.
+  double day_of_year = static_cast<double>(day) + 1.0;
+
+  // Root/mycorrhiza turnover (litter): per-day rate is a flat
+  // (1/root_turnover_years)/183 fraction of the standing pool within a
+  // fixed day 121-303 (1 May - 30 Oct) window, zero outside - mirrors
+  // cone_turnover's own fixed-window spread below. Previously scaled by
+  // a senescence DEGREE derived from photosynthesis.fS (leaf area's own
+  // cohort-turnover signal, fAPAR_and_LAI.cpp); replaced (2026-11-16)
+  // because that borrowed signal had no empirical support for root
+  // litter *timing* specifically - the one study found that measured
+  // Scots pine fine-root necromass seasonally (Makkonen & Helmisaari
+  // 1998, For. Ecol. Manage. 102:283-290) found no distinct within-year
+  // pattern across four growing seasons, the same "fitting a shape just
+  // chases noise" conclusion cone_turnover's own window already reached
+  // for masting. The 121-303 window instead comes from Ding et al.
+  // (2020, Tree Physiology 40:272-283, same site network): measured
+  // Scots pine root elongation starts May-Aug and stops by day 303 every
+  // year - a growth-phenology window, not a death-phenology one (no
+  // paper measured that directly), so this is still a simplification,
+  // not a validated shape; see manuscript/root_litter_fitting/
+  // root_litter_fitting.Rmd for the full literature write-up and
+  // caveats. Spreading the annual total (1/root_turnover_years) evenly
+  // over the window also matches how the source literature itself
+  // defines fine-root litter production (FRB / longevity-in-years), see
+  // that notebook's Sect. 3.1.
   //
   // NOTE: parameters.root_lifetime looks like the natural rate to reuse
   // here (same role as n_age plays for needles) but is NA for this site's
@@ -136,19 +152,14 @@ void actual_growth(int day,
   // root_as_Ding == FALSE branch, which nothing in this session's runs
   // exercises (root_as_Ding defaults TRUE). Using it as-is would silently
   // NaN the whole run the moment root_turnover is enabled, so a separate,
-  // explicitly-flagged placeholder is used instead until root_lifetime
-  // itself is actually populated/validated.
-  if (day == 0) {
-    tree_state.fS_reached_one_roots = false;
-  }
-  if (photosynthesis.fS >= 1.0 && day > 50) {
-    tree_state.fS_reached_one_roots = true;
-  }
-  double root_senescence_degree = tree_state.fS_reached_one_roots ? (1.0 - photosynthesis.fS) : 0.0;
-
+  // real parameter (root_turnover_years, moved out of this file 2026-11-16
+  // so it's fittable without recompiling - see manuscript/root_litter_fitting)
+  // is used instead until root_lifetime itself is actually populated/validated.
   if (boolsettings.root_turnover) {
-    const double root_turnover_years = 3.0; // TODO: placeholder (matches n_age's default) - needs real calibration, and ideally parameters.root_lifetime once that's actually populated
-    double daily_turnover_fraction = root_senescence_degree / (root_turnover_years * 365.0);
+    double daily_turnover_fraction = 0.0;
+    if (day_of_year >= 121.0 && day_of_year <= 303.0) {
+      daily_turnover_fraction = (1.0 / parameters.root_turnover_years) / 183.0;
+    }
 
     // Pipe-model litter boost (mirrors needle litter's litter_boost_today,
     // growth.cpp's makela_loss_boost_factor): symmetric, uncapped ratio of
@@ -195,12 +206,6 @@ void actual_growth(int day,
     all_out.root_litter_N[days_gone+day]       = 0.0;
     all_out.mycorrhiza_litter_N[days_gone+day] = 0.0;
   }
-
-  // day is 0-indexed here (day==0 is Jan 1); day_of_year is converted to
-  // the 1-indexed convention (1-366) the R-side fit used - shared by
-  // leaf_mass_correction's needle litter and cone_turnover's cone litter
-  // below, neither of which depends on the other being on too.
-  double day_of_year = static_cast<double>(day) + 1.0;
 
   // leaf_mass_correction: leaf_mass becomes a genuinely accumulating pool
   // (growth.cpp's tree_state.needles in - the real, Makela-reduced and

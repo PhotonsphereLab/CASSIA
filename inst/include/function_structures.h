@@ -144,12 +144,6 @@ struct growth_state {
   // roots pool itself. Mirrors N_repo_current's role for needles.
   double R_bal_current = 0.0;
 
-  // Root/mycorrhiza turnover: same sticky-senescence mechanism as
-  // fAPAR_and_LAI.cpp's fS_reached_one for needles, kept separately here
-  // since that flag isn't itself passed through to actual_growth(). Reset
-  // to false at day == 0.
-  bool fS_reached_one_roots = false;
-
   // leaf_mass_correction (Makela correction on needle leaf_mass,
   // 2026-11-05 redesign): C_N_year damps state.needles DIRECTLY
   // (growth.cpp) - the real needle-growth demand signal sugar_model.cpp

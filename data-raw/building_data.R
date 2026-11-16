@@ -232,6 +232,13 @@ parameters_p[86,] <- c(83.3, NA, NA) # omega_litter - skew-normal scale (days)
 parameters_p[87,] <- c(-25.22, NA, NA) # alpha_litter - skew-normal shape (skewness)
 parameters_p[88,] <- c(4.8, NA, NA) # xi_offset_litter - added to the prior year's fS<0.5 crossing day to get this year's skew-normal location (days)
 
+# Row 89 (2026-11-16): root_turnover_years, moved out of actual_growth.cpp's
+# hardcoded root_turnover placeholder so it's fittable without recompiling -
+# see manuscript/root_litter_fitting (private fine-root biomass data, not
+# shareable, so the fitting notebook lives outside data-raw/). Default of 3
+# unchanged from the old hardcoded value pending that fit.
+parameters_p[89,] <- c(3, NA, NA) # root_turnover_years
+
 row.names(parameters_p) <- c("Q10.N", "Rm.NR", "Q10.S", "Rm.S", "Q10.R", "Rm.R", "sR0", "sRc", "growth.myco", "root.lifetime",
 "HH0", "sH0", "LH", "LH0", "sHc", "sN0", "LN", "LN0", "sNc", "HN0", "sD0.Trad", "LD", "LD0", "sDc", "sDc.T.count",
 "tau.Ee", "tau.El", "tau.We", "tau.Wl", "tau.GPP", "Uggla", "sB0", "sBc", "LB",
@@ -244,7 +251,7 @@ row.names(parameters_p) <- c("Q10.N", "Rm.NR", "Q10.S", "Rm.S", "Q10.R", "Rm.R",
 "GPP_mean", "GPP_initial",
 "tau_H", "tau_R", "tau_N", "sLc_litter", "theta_N_needles", "theta_N_roots", "theta_N_myco",
 "retrans_needles", "retrans_roots", "retrans_myco",
-"omega_litter", "alpha_litter", "xi_offset_litter")
+"omega_litter", "alpha_litter", "xi_offset_litter", "root_turnover_years")
 save(parameters_p, file = paste0(data.direct, "/parameters_p.RData"))
 
 ######

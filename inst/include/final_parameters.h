@@ -171,6 +171,12 @@ struct CASSIA_parameters {
   double omega_litter;
   double alpha_litter;
   double xi_offset_litter;
+
+  // Root turnover time (years), actual_growth.cpp's root_turnover daily
+  // litter fraction - moved out of that file's hardcoded placeholder
+  // (2026-11-16) so it can be fit against real fine-root biomass data
+  // without recompiling; see manuscript/root_litter_fitting.
+  double root_turnover_years;
 };
 
 struct CASSIA_common {

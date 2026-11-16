@@ -305,6 +305,8 @@ CASSIA_parameters make_CASSIA_parameters(Rcpp::DataFrame input_parameters,
   out.alpha_litter = temp139[0];
   std::vector<double> temp140 = input_parameters["xi_offset_litter"];
   out.xi_offset_litter = temp140[0];
+  std::vector<double> temp141 = input_parameters["root_turnover_years"];
+  out.root_turnover_years = temp141[0];
 
   return out;
 }

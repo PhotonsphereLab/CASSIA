@@ -16,30 +16,47 @@ double makela_control_factor(double X_bal, double X_current, double tau) {
 }
 
 // Mirror image of makela_control_factor, for LOSS rather than growth -
-// but deliberately NOT capped the same damping-only way. Growth
-// (makela_control_factor) stays damping-only: it never exceeds the
-// calibrated baseline rate (1/n_age of N_repo/year), by design, same as
-// every other growth-rate factor in this codebase (see that function's
-// comment). Litter instead needs to move BOTH ways, by the reciprocal
-// ratio: BOOSTS (> 1) when X_current (the pool) has overgrown past
-// X_bal (N_repo) - shed faster, not just grow slower - and REDUCES
-// (< 1) when the pool is undershooting N_repo, so an already-undergrown
-// pool doesn't keep shedding at the full baseline rate while growth
-// (capped, unable to compensate by growing faster) can never catch up.
-// Without this, growth and litter both saturate at exactly the
-// baseline rate once the pool sits below N_repo, locking the whole
+// but not capped the same damping-only way. Growth (makela_control_factor)
+// stays damping-only: it never exceeds the calibrated baseline rate
+// (1/n_age of N_repo/year), by design, same as every other growth-rate
+// factor in this codebase (see that function's comment). Litter instead
+// needs to move BOTH ways, by the reciprocal ratio: BOOSTS (> 1) when
+// X_current (the pool) has overgrown past X_bal - shed faster, not just
+// grow slower - and REDUCES (< 1) when the pool is undershooting, so an
+// already-undergrown pool doesn't keep shedding at the full baseline rate
+// while growth (capped, unable to compensate by growing faster) can never
+// catch up. The history below (originally about the needle-litter use of
+// this same function, `litter_boost_year`/`litter_boost_today` -
+// superseded 2026-11-10 by the skew-normal needle-litter redesign, no
+// longer a live call site) argued for leaving the ratio fully unbounded;
+// this function's only current caller is root_leaf_correction's
+// `root_bal_boost_today` (actual_growth.cpp), where that turned out to be
+// a real bug, not just a theoretical risk: a ~13x mismatch - the entirely
+// ordinary young-stand phase where `culm_growth.roots` (seeded at a fixed
+// 2.8 kg C/tree, CASSIA.cpp) is still large relative to a leaf_mass just
+// ramping up from near-zero - raised to tau_R=5 gave a ~430,000x boost,
+// shedding 734 kg/tree of root litter from a <1 kg standing pool in a
+// single day (confirmed 2026-11-16, manuscript/root_litter_fitting/).
+// Capped at `max_boost` below as a result - generous enough for a real,
+// meaningful boost when genuinely overgrown, bounded well short of a
+// power-law blowup. No floor - undershooting still damps toward 0 freely,
+// unchanged.
+//
+// Historical reasoning for the old needle-litter call site, kept for
+// context: without this cap, growth and litter both saturate at exactly
+// the baseline rate once the pool sits below N_repo, locking the whole
 // system into a stable cycle around N_repo/n_age that can never track a
-// N_repo target that keeps rising as the tree grows (confirmed via
-// debug trace, 1998-2022: peak tracks N_repo/n_age's trend (+0.025/yr),
-// not N_repo's own (+0.076/yr) - a gap that widens from -0.12 to +1.18
-// over 25 years). No floor/ceiling here at all - X_current/X_bal raised
-// to tau is used directly, so the correction is genuinely symmetric.
+// N_repo target that keeps rising as the tree grows (confirmed via debug
+// trace, 1998-2022: peak tracks N_repo/n_age's trend (+0.025/yr), not
+// N_repo's own (+0.076/yr) - a gap that widens from -0.12 to +1.18 over
+// 25 years). That reasoning no longer has a live call site to apply to.
 double makela_loss_boost_factor(double X_bal, double X_current, double tau) {
   const double epsilon = 1e-6;
   if (X_current < epsilon || X_bal < epsilon) {
     return 1.0;
   }
-  return std::pow(X_current / X_bal, tau);
+  const double max_boost = 2.0;
+  return std::min(max_boost, std::pow(X_current / X_bal, tau));
 }
 
 // Tested uncapped (2026-11-04) and reverted: without makela_control_factor's
@@ -581,9 +598,23 @@ void growth(int day,
   if (boolsettings.root_leaf_correction && day == 0) {
     const double alpha_r = 0.47; // PREBAS/CROBAS alfar3, Scots pine, site fertility type 3
 
+    // Below this, last year's peak leaf_mass is too small for alpha_r*leaf_mass
+    // to be a meaningful pipe-model target - without this guard, a tiny-but-
+    // nonzero target (e.g. following a leaf_mass near-collapse) sails straight
+    // past makela_control_factor/makela_loss_boost_factor's own epsilon=1e-6
+    // guard (meant only to catch literal zero), and the litter boost -
+    // deliberately uncapped, unlike the growth-side correction - explodes by
+    // many orders of magnitude (confirmed: p-hydro root_litter reached ~5e8
+    // kg/tree in one year following a leaf_mass near-collapse the year
+    // before). 0.01 kg C/tree ~ 10 g of needle carbon, i.e. effectively no
+    // canopy - treat as "no real target this year" (R_bal = 0) instead,
+    // which both helper functions' existing epsilon guard already handles
+    // safely (returns 1.0 - no correction, rather than an explosive ratio).
+    const double leaf_mass_min = 0.01;
+
     double leaf_mass_max_last_year = state.max_leaf_mass_running_for_roots;
     double roots_max_last_year = state.max_roots_running;
-    double R_bal = alpha_r * leaf_mass_max_last_year;
+    double R_bal = (leaf_mass_max_last_year > leaf_mass_min) ? alpha_r * leaf_mass_max_last_year : 0.0;
     state.C_R_year = makela_control_factor(R_bal, roots_max_last_year, parameters.tau_R);
     state.R_bal_current = R_bal; // threaded through to actual_growth.cpp's litter boost
 
