@@ -427,6 +427,31 @@ ggplot() +
 
 ## 4  Litter vs. real data, by component
 
+**Fit status, by component - read before the figures below, not after**:
+plotting a model line next to real data points in the same panel does
+*not* mean that component was calibrated against that data.
+
+- **Needles**: the only component where the model was actually fit to
+  real data - the skew-normal timing shape (Sect. 5) was chosen and its
+  parameters set by RMSE against real `karike` trap data.
+- **Cones**: mechanistic only. `cone_litter`'s magnitude comes from real
+  bud growth and a masting cycle reusing `n_age`, but neither that
+  cycle's shedding window (day 121-273) nor its magnitude/shed-fraction
+  were fit to the real `käpy` data plotted alongside it below - fitting
+  a window was tried and abandoned as meaningless for a masting process
+  (Sect. 5.2). Whether the model/real lines below look close or far
+  apart is not evidence of a validated mechanism either way.
+- **Roots**: model output only - no comparable real data exists in this
+  notebook at all (belowground, funnel traps don't catch it). A separate,
+  private calibration against real fine-root biomass and literature
+  (turnover rate, litter-timing window) lives in
+  `manuscript/root_litter_fitting/root_litter_fitting.Rmd`, not here.
+- **Branches**: no mechanism exists yet - `branch_litter` is hardcoded to
+  `0`. The real `oksa` data plotted below is context for *future* work,
+  not a comparison against anything live.
+- **Twigs & bark**: no CASSIA mechanism at all; real data only, for
+  context.
+
 `real_litter`/`comparison` were already prepared in Sect. 2.3;
 `spp_litter_df`/`phydro_litter_df` in Sect. 2.4. The cumulative needle
 data-vs-model comparison (previously its own two-panel figure here) is now
@@ -689,7 +714,7 @@ p_cones <- ggplot(mapping = aes(x = pvm, y = cum_kg_per_tree, colour = Component
   scale_linetype_manual(values = model_linetypes_cumulative, name = "CASSIA model") +
   guides(colour = guide_legend(override.aes = list(linetype = 0, shape = 16))) +
   labs(title = "Cones",
-       subtitle = wrap_sub("Data: %.2f kg/tree. Model (cone_litter, masting cycle - all standing cone biomass sheds every 3rd year): PRELES %.2f, p-hydro %.2f. SPP excluded (2015-2016 only - see Sect. 4.2).",
+       subtitle = wrap_sub("NOT fitted to this data (mechanistic only - see Sect. 4 fit-status note). Data: %.2f kg/tree. Model (cone_litter, masting cycle - all standing cone biomass sheds every 3rd year): PRELES %.2f, p-hydro %.2f. SPP excluded (2015-2016 only - see Sect. 4.2).",
                            cones_data_total, cone_model_total, cone_model_phydro_total),
        x = NULL, y = "Cumulative litter (kg / tree)") +
   panel_theme +
@@ -726,7 +751,7 @@ p_roots <- ggplot(mapping = aes(x = pvm, y = cum_kg_per_tree, colour = Component
   scale_linetype_manual(values = model_linetypes_cumulative, name = "CASSIA model") +
   guides(colour = guide_legend(override.aes = list(linetype = 0, shape = 16))) +
   labs(title = "Roots",
-       subtitle = wrap_sub("No funnel-trap root litter data exists (belowground). Model (root_litter, root_turnover mechanism): PRELES %.2f, p-hydro %.2f. SPP excluded (2015-2016 only - see Sect. 4.2).",
+       subtitle = wrap_sub("Not calibrated against anything here - no funnel-trap root litter data exists (belowground). Model (root_litter, root_turnover mechanism) shown for reference only: PRELES %.2f, p-hydro %.2f. SPP excluded (2015-2016 only - see Sect. 4.2). Real calibration (manuscript/root_litter_fitting, private data) lives outside this notebook.",
                            root_model_total, root_model_phydro_total),
        x = NULL, y = "Cumulative litter (kg / tree)") +
   panel_theme +
@@ -820,7 +845,12 @@ component_daily <- do.call(rbind, lapply(names(litter_components), function(col)
   agg$trees_per_ha   <- density_by_year[as.character(agg$year)]
   agg$kg_per_tree    <- (agg$amount / collector_area_m2) / (agg$trees_per_ha / 10000) / 1000
   agg$day_of_year    <- as.integer(format(agg$pvm, "%j"))
-  agg$year_label      <- year_label(agg$year)
+  # "(fitted)"/"(held-out)" is only meaningful for Needles (the one
+  # component actually fit to this train/validation split, Sect. 5) -
+  # every other component gets a plain year label instead of implying a
+  # fit split that doesn't exist for it (Cones/Twigs/Bark have no such
+  # split - Cones was never fit at all, Twigs/Bark have no model).
+  agg$year_label      <- if (col %in% c("neulanen", "lehti")) year_label(agg$year) else as.character(agg$year)
   agg$cum_kg_per_tree <- ave(agg$kg_per_tree, agg$year, FUN = cumsum)
   data.frame(pvm = agg$pvm, year_label = agg$year_label, day_of_year = agg$day_of_year,
              cum_kg_per_tree = agg$cum_kg_per_tree,
@@ -887,7 +917,7 @@ root_day_long <- rbind(
   data.frame(year = spp_litter_df$year, day_of_year = spp_litter_df$day_of_year,
              litter = spp_litter_df$root_litter, Model = "SPP")[spp_litter_df$year %in% 2006:2016, ]
 )
-root_day_long$year_label <- year_label(root_day_long$year)
+root_day_long$year_label <- as.character(root_day_long$year)  # plain - no fit/held-out split exists for roots
 root_day_long$Component  <- "Roots"
 root_day_long$cum_litter <- ave(root_day_long$litter, interaction(root_day_long$year, root_day_long$Model),
                                  FUN = cumsum)
@@ -944,7 +974,7 @@ cone_day_long <- rbind(
   data.frame(year = spp_litter_df$year, day_of_year = spp_litter_df$day_of_year,
              litter = spp_litter_df$cone_litter, Model = "SPP")[spp_litter_df$year %in% 2006:2016, ]
 )
-cone_day_long$year_label      <- year_label(cone_day_long$year)
+cone_day_long$year_label      <- as.character(cone_day_long$year)  # plain - cones were never fit, no train/validation split applies
 cone_day_long$Component       <- "Cones"
 cone_day_long$cum_kg_per_tree <- ave(cone_day_long$litter, interaction(cone_day_long$year, cone_day_long$Model),
                                       FUN = cumsum)
@@ -961,7 +991,7 @@ p_cones_day <- ggplot(component_daily[component_daily$Component == "Cones", ],
   guides(colour = guide_legend(override.aes = list(linetype = 0, shape = 16))) +
   facet_wrap(~year_label, ncol = 4) +
   labs(title = "Cones - cumulative by day-of-year",
-       subtitle = "Points: real data. Lines: cone_litter model output (0 except masting years), PRELES/p-hydro/SPP. Black dashed: day 121/273 shedding window. Shaded: Portillo-Estrada et al. (2013) Jun-Jul peak (multi-year average; masting scatters individual years).",
+       subtitle = "NOT fitted to this data (mechanistic only - Sect. 4 fit-status note). Points: real data. Lines: cone_litter model output (0 except masting years), PRELES/p-hydro/SPP. Black dashed: day 121/273 shedding window. Shaded: Portillo-Estrada et al. (2013) Jun-Jul peak (multi-year average; masting scatters individual years).",
        x = "Day of year", y = "Cumulative litter (kg / tree)") +
   day_panel_theme +
   theme(legend.box = "vertical")
@@ -1034,55 +1064,25 @@ The printed comparison above speaks to the earlier-onset question from this sess
 
 The black dashed lines in the Needles panel above (day 150/300) are a visual estimate of the real data's own onset/tail-off, not a literal CASSIA parameter - the new skew-normal mechanism no longer uses any single fixed calendar day at all (its location `xi` shifts every year from the prior year's `fS` signal, Sect. 5.1), so there is no one "day in the code" left to mark with a single line the way the old day-212 gate had.
 
-### 4.3  Next steps: calibrating needles, roots, and branches against real data
+### 4.3  Next step: branches
 
 Needles are the only litter stream validated against real data above.
-Two more are wanted:
+Roots are now calibrated too, just not in this notebook - real fine-root
+biomass data, Ding et al. (2021)'s directly-measured turnover rate, and
+a literature-sourced litter-timing window are all in
+`manuscript/root_litter_fitting/root_litter_fitting.Rmd` (kept out of
+this repo: private data). `root_turnover_years` is a real `parameters_p`
+entry now, not the old hardcoded placeholder this section used to flag.
 
-- **Roots.** No litter-trap equivalent exists - Korhonen et al. (2013)
-  explicitly excluded fine roots from this same study's scope ("litter
-  traps don't catch root turnover"), so neither 4.1 nor 4.2 above can be
-  reused for root litter directly. Real magnitude and turnover-time
-  numbers do exist, though (no within-year seasonal curve found - only
-  annual totals and a mycelia summer/winter split):
-    - **Magnitude**: Ding et al. (2021, *Forest Ecology and Management*
-      489:119081) - four southern-Finland Scots pine sites along a
-      fertility gradient (CTY/CT/VT/MT), litter-trap (AG) and
-      minirhizotron-based (BG) measurements. Total annual litter
-      (AG + BG) was 206.2/276.2/307.1 g C/m^2 for CT/VT/MT;
-      **belowground (BG) litter alone was 70-91 g C/m^2/yr**, of which
-      ectomycorrhizal (EcM) mycelia production was only 8-13% - the rest
-      is fine-root litter/exudates, i.e. roughly 61-84 g C/m^2/yr is
-      fine-root-specific. AG litter was 1.7-3.3x higher than BG across
-      sites (131-236 vs. 70-91 g/m^2/yr per the abstract).
-    - **Turnover time**: the same paper's Table 3 (Kaplan-Meier median
-      fine-root longevity, pine) gives 324/881/367/487 days (~0.89/2.41/
-      1.01/1.33 years) for CTY/CT/VT/MT respectively - not Hyytiälä
-      itself, but the same species, region, and order of magnitude as
-      `parameters_p`'s own `root.lifetime` (1.7 years, Hyde).
-    - **A real, actionable gap this surfaces**: `root_turnover`'s own
-      turnover-time constant (`actual_growth.cpp`) is a hardcoded `3.0`
-      placeholder ("matching needle longevity's default... TODO: ideally
-      `parameters.root_lifetime` once that's actually populated") - but
-      `root.lifetime` **is** already populated (1.7 years, Hyde) and
-      simply isn't being read by `root_turnover` at all. Wiring that up
-      would be a direct, low-effort step toward real root litter
-      calibration, independent of finding more data.
-    - Other candidate sources not yet pulled numbers from:
-      `CASSIA_Calibration/Raw_Data/ryhti_data/` (root litter
-      decomposition rates, not production magnitude) and the
-      Helmisaari/Ostonen fine-root biomass literature already cited
-      elsewhere in this project.
-- **Branches.** CASSIA has no branch litter mechanism at all right now
-  (`output_functions.cpp`: hardcoded to `0`, "no branch biomass pool") -
-  calibrating this means building that mechanism first, not just
-  updating a validation plot. Sect. 4.1/4.2's branch panels already plot
-  one real candidate target (`karike_df_all`'s `oksa` column, 1997-2003,
-  ground-frame collection); Korhonen's independent branch rate (Sect. 4
-  above, ~117 g/m2/yr, blended large/small branch N%) is a second
-  cross-check once a mechanism exists to calibrate.
-
-Both are future work, not attempted in this session.
+**Branches** are what's left. CASSIA has no branch litter mechanism at
+all right now (`output_functions.cpp`: hardcoded to `0`, "no branch
+biomass pool") - calibrating this means building that mechanism first,
+not just updating a validation plot. Sect. 4.1/4.2's branch panels
+already plot one real candidate target (`karike_df_all`'s `oksa` column,
+1997-2003, ground-frame collection); Korhonen's independent branch rate
+(Sect. 4 above, ~117 g/m2/yr, blended large/small branch N%) is a second
+cross-check once a mechanism exists to calibrate against. Not attempted
+in this session.
 
 ---
 
