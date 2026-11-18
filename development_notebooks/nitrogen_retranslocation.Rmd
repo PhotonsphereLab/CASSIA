@@ -77,7 +77,17 @@ run_with_retrans <- function(retrans_needles_val, retrans_roots_val, retrans_myc
     photosynthesis_as_input    = FALSE, nitrogen_balance = 25, nitrogen_change = TRUE,
     preles                     = TRUE, fAPAR_Tian = TRUE, organ_level_sugar = FALSE,
     needle_mass_grows          = TRUE, height_diameter_correction = TRUE,
-    leaf_mass_correction       = TRUE, root_turnover = TRUE
+    leaf_mass_correction       = TRUE, root_turnover = TRUE,
+    # Added 2026-11-18: also turns root_leaf_correction on for the first
+    # time here (it wasn't set at all before - pipe_model_correction ORs
+    # it in alongside height_diameter_correction/leaf_mass_correction
+    # above, which were already TRUE), and forces growth_proxy_height =
+    # FALSE (diameter-referenced needle-growth vigor signal) as a side
+    # effect - see development_notebooks/needle_vigor_signal.Rmd and
+    # manuscript/nitrogen_uptake. This run also now includes the
+    # theta_N_*/1000 litter-N and nitrogen_balance-debit fix (same date),
+    # unconditionally, since that's a package-level correctness fix.
+    pipe_model_correction      = TRUE
   )
 }
 

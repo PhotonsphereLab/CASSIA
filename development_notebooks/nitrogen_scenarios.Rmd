@@ -256,7 +256,8 @@ run_nitrogen <- function(nitrogen_balance, nitrogen_change = FALSE,
     fAPAR_Tian                 = TRUE,
     organ_level_sugar          = FALSE,
     needle_mass_grows          = TRUE,
-    height_diameter_correction = TRUE
+    height_diameter_correction = TRUE,
+    pipe_model_correction      = TRUE
   )
 }
 
