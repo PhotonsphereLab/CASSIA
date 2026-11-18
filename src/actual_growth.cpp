@@ -191,8 +191,13 @@ void actual_growth(int day,
     all_out.root_litter[days_gone+day]       = root_litter_today;
     all_out.mycorrhiza_litter[days_gone+day] = myco_litter_today;
 
-    double root_litter_N_gross = parameters.theta_N_roots / parameters.carbon_share * root_litter_today;
-    double myco_litter_N_gross = parameters.theta_N_myco  / parameters.carbon_share * myco_litter_today;
+    // theta_N_* are stored as mg N / g dry mass (e.g. 7.7, 3.0) - divide by
+    // 1000 to get the kg N / kg dry mass fraction this formula needs. Missing
+    // this conversion inflated all litter N output 1000x (found 2026-11-18,
+    // manuscript/nitrogen_uptake Sect. "Open items" - litter N was 2-3 orders
+    // of magnitude above real reference rows even after biomass settled).
+    double root_litter_N_gross = parameters.theta_N_roots / 1000.0 / parameters.carbon_share * root_litter_today;
+    double myco_litter_N_gross = parameters.theta_N_myco  / 1000.0 / parameters.carbon_share * myco_litter_today;
     root_litter_N_retrans = root_litter_N_gross * parameters.retrans_roots;
     myco_litter_N_retrans = myco_litter_N_gross * parameters.retrans_myco;
     all_out.root_litter_N[days_gone+day]       = root_litter_N_gross - root_litter_N_retrans;
@@ -280,7 +285,8 @@ void actual_growth(int day,
     all_out.culm_growth.needle_litter[days_gone+day] = all_out.culm_growth.needle_litter[index_ref] + needle_litter_today;
     all_out.needle_litter[days_gone+day] = needle_litter_today;
 
-    double needle_litter_N_gross = parameters.theta_N_needles / parameters.carbon_share * needle_litter_today;
+    // theta_N_needles is mg N / g dry mass - same /1000 fix as root/myco above.
+    double needle_litter_N_gross = parameters.theta_N_needles / 1000.0 / parameters.carbon_share * needle_litter_today;
     needle_litter_N_retrans = needle_litter_N_gross * parameters.retrans_needles;
     all_out.needle_litter_N[days_gone+day] = needle_litter_N_gross - needle_litter_N_retrans;
 

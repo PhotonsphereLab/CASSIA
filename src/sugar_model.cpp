@@ -461,15 +461,18 @@ void sugar_model(int day,
         // More sugar so nitrogen is limiting growth
 
         // The missing nitrogen as the capacity difference is multiplied by the nitrogen needed for the growth
-        double nitrogen_target = 4.9/0.5 * (storage_term.needles - nitrogen_capacity.needles) * tree_state.needles -
-          2.1/0.5 * (storage_term.needles - nitrogen_capacity.bud) * tree_state.bud -
-          4.5/0.5 * phloem_share * ((storage_term.phloem - nitrogen_capacity.wall) * tree_state.wall +
+        // Same theta_o/1000/carbon_share fix as the nitrogen_balance updates
+        // below (found 2026-11-18) - nitrogen_target must be in kg N to be
+        // comparable to uptake.root_uptake/ectomycorrhizal_uptake just below.
+        double nitrogen_target = 4.9/1000.0/0.5 * (storage_term.needles - nitrogen_capacity.needles) * tree_state.needles -
+          2.1/1000.0/0.5 * (storage_term.needles - nitrogen_capacity.bud) * tree_state.bud -
+          4.5/1000.0/0.5 * phloem_share * ((storage_term.phloem - nitrogen_capacity.wall) * tree_state.wall +
           (storage_term.phloem - nitrogen_capacity.height) * tree_state.height) -
-          4.5/0.5 * xylem_sh_share * ((storage_term.xylem_st - nitrogen_capacity.wall) * tree_state.wall +
+          4.5/1000.0/0.5 * xylem_sh_share * ((storage_term.xylem_st - nitrogen_capacity.wall) * tree_state.wall +
           (storage_term.xylem_sh - nitrogen_capacity.height) * tree_state.height) -
-          4.5/0.5 * xylem_st_share * ((storage_term.xylem_st - nitrogen_capacity.wall) * tree_state.wall +
+          4.5/1000.0/0.5 * xylem_st_share * ((storage_term.xylem_st - nitrogen_capacity.wall) * tree_state.wall +
           (storage_term.xylem_st - nitrogen_capacity.height) * tree_state.height) -
-          3.0/0.5 * (storage_term.roots - nitrogen_capacity.roots) * tree_state.roots;
+          3.0/1000.0/0.5 * (storage_term.roots - nitrogen_capacity.roots) * tree_state.roots;
 
         // The sugar that could have gone into growth is seen as the investment pool
         double sugar_to_invest = (1 + common.Rg_N) * ((storage_term.needles - nitrogen_capacity.needles) * tree_state.needles + (storage_term.needles - nitrogen_capacity.bud) * tree_state.bud) +
@@ -612,16 +615,21 @@ void sugar_model(int day,
       // one-day lag as uptake.total_uptake just above: actual_growth()
       // runs after this function each day, so it's today's value that
       // gets read on tomorrow's call.
+      // theta_o values below (4.9/2.1/4.5/3.0) are mg N / g dry mass
+      // (Korhonen 2013) - divided by 1000 to get the kg N / kg dry mass
+      // fraction this formula needs, then by carbon_share (0.5) for the
+      // C->dry-mass conversion. Missing the /1000 inflated this N debit
+      // 1000x (found 2026-11-18, same bug as actual_growth.cpp's litter N).
       nitrogen_balance = nitrogen_balance + uptake.total_uptake + tree_state.N_retranslocated_today -
-        4.9/0.5 * std::min(storage_term.needles, nitrogen_capacity.needles) * tree_state.needles -
-        2.1/0.5 * std::min(storage_term.needles, nitrogen_capacity.bud) * tree_state.bud -
-        4.5/0.5 * phloem_share * (std::min(storage_term.phloem, nitrogen_capacity.wall) * tree_state.wall +
+        4.9/1000.0/0.5 * std::min(storage_term.needles, nitrogen_capacity.needles) * tree_state.needles -
+        2.1/1000.0/0.5 * std::min(storage_term.needles, nitrogen_capacity.bud) * tree_state.bud -
+        4.5/1000.0/0.5 * phloem_share * (std::min(storage_term.phloem, nitrogen_capacity.wall) * tree_state.wall +
         std::min(storage_term.phloem, nitrogen_capacity.height) * tree_state.height) -
-        4.5/0.5 * xylem_st_share * (std::min(storage_term.xylem_st, nitrogen_capacity.wall) * tree_state.wall +
+        4.5/1000.0/0.5 * xylem_st_share * (std::min(storage_term.xylem_st, nitrogen_capacity.wall) * tree_state.wall +
         std::min(storage_term.xylem_st, nitrogen_capacity.height) * tree_state.height) -
-        4.5/0.5 * xylem_sh_share * (std::min(storage_term.xylem_sh, nitrogen_capacity.wall) * tree_state.wall +
+        4.5/1000.0/0.5 * xylem_sh_share * (std::min(storage_term.xylem_sh, nitrogen_capacity.wall) * tree_state.wall +
         std::min(storage_term.xylem_sh, nitrogen_capacity.height) * tree_state.height) -
-        3.0/0.5 * std::min(storage_term.roots, nitrogen_capacity.roots) * tree_state.roots;
+        3.0/1000.0/0.5 * std::min(storage_term.roots, nitrogen_capacity.roots) * tree_state.roots;
     }
 
     /*
@@ -934,12 +942,14 @@ void sugar_model(int day,
         // credits back the resorbed fraction of today's needle/root/
         // mycorrhiza litter N (actual_growth.cpp), always on - same
         // one-day lag as uptake.total_uptake above.
+        // Same theta_o/1000/carbon_share fix as the organ-level pathway
+        // above and actual_growth.cpp's litter N (found 2026-11-18).
         nitrogen_balance = nitrogen_balance + uptake.total_uptake + tree_state.N_retranslocated_today -
-          4.9/0.5 * std::min(storage, nitrogen_capacity_all) * tree_state.needles -
-          2.1/0.5 * std::min(storage, nitrogen_capacity_all) * tree_state.bud -
-          4.5/0.5 * std::min(storage, nitrogen_capacity_all) * tree_state.height -
-          4.5/0.5 * std::min(storage, nitrogen_capacity_all) * tree_state.diameter -
-          3.0/0.5 * std::min(storage, nitrogen_capacity_all) * tree_state.roots;
+          4.9/1000.0/0.5 * std::min(storage, nitrogen_capacity_all) * tree_state.needles -
+          2.1/1000.0/0.5 * std::min(storage, nitrogen_capacity_all) * tree_state.bud -
+          4.5/1000.0/0.5 * std::min(storage, nitrogen_capacity_all) * tree_state.height -
+          4.5/1000.0/0.5 * std::min(storage, nitrogen_capacity_all) * tree_state.diameter -
+          3.0/1000.0/0.5 * std::min(storage, nitrogen_capacity_all) * tree_state.roots;
       }
 
       sugar_all = sugar.needles + PF - tree_state.use + tree_state.release - std::min(storage_term.respiration, nitrogen_capacity_all) * tree_state.Rm_a -
