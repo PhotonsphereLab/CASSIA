@@ -40,13 +40,14 @@
 #'       copied from (Methods S1, eqs 1-2); \code{nitrogen_uptake()}
 #'       converts it to the areal quantity Franklin's final uptake step
 #'       needs (\eqn{N_{av}\cdot d}, \eqn{d=0.25} m effective soil depth)
-#'       internally. Defaults to a flat \code{6.4} for every day when
-#'       absent - real Hyytiälä mean extractable soil N (0-30 cm profile,
-#'       \code{korhonen_mineral_N.csv}) divided by that same \eqn{d},
-#'       not a placeholder, though it stands in for a true daily
-#'       availability rate with no local mineralisation data to confirm
-#'       it; see \code{manuscript/nitrogen_uptake} Sect. 1, 2, 5 for the
-#'       derivation and caveats.}
+#'       internally. Defaults to a flat \code{0.0507} for every day when
+#'       absent - Korhonen et al. (2013)'s own measured N mass-balance for
+#'       this exact site (~19 kg N ha\eqn{^{-1}} yr\eqn{^{-1}} net release
+#'       of N from decomposition), converted via Franklin's 150-day
+#'       growing-season convention and effective soil depth \eqn{d}. A
+#'       real measured rate, not the standing soil N concentration the
+#'       previous default used; see \code{manuscript/nitrogen_uptake}
+#'       Sect. 1, 2, 5 for the derivation and caveats.}
 #'   }
 #' @param site Site name for built-in parameterisations: \code{"Hyde"}
 #'   (Hyytiälä), \code{"Lettosuo"}, or \code{"HF_China"}. Add new sites by
