@@ -139,7 +139,8 @@ CASSIA_leaf_mass <- CASSIA_cpp(
   height_diameter_correction = TRUE,
   leaf_mass_correction       = TRUE,
   cone_turnover              = TRUE, # own toggle as of 2026-11-10 (split out from leaf_mass_correction - no real dependency between them)
-  root_turnover              = TRUE  # confirmed not to change needle_litter/leaf_mass (independent code paths, checked)
+  root_turnover              = TRUE, # confirmed not to change needle_litter/leaf_mass (independent code paths, checked)
+  growth_proxy_height        = FALSE # diameter proxy, not height - height_diameter_correction above damps height directly, so needle growth (and leaf_mass behind it) referencing height as its lagged vigor signal inherited that damping; diameter is the correction's own uncorrected reference. See development_notebooks/needle_vigor_signal.Rmd for the investigation.
 )
 
 # CASSIA's needle_litter (and N_repo/leaf_mass behind it) is kg CARBON/tree
@@ -352,6 +353,7 @@ run_leaf_mass <- function(weather, ...) {
     leaf_mass_correction       = TRUE,
     cone_turnover              = TRUE,
     root_turnover              = TRUE,
+    growth_proxy_height        = FALSE, # diameter proxy throughout, matching Sect. 2's main run (needle_vigor_signal.Rmd)
     ...
   )
 }
@@ -418,7 +420,7 @@ ggplot() +
              colour = okabe_ito_obs, size = 2.5) +
   scale_x_date(date_breaks = "5 years", date_labels = "%Y") +
   labs(title = "leaf_mass pool vs. N_repo (yearly target) and real foliage biomass",
-       subtitle = "1998-2022, Hyde-initialised, leaf_mass_correction = TRUE. Points: real pine_foliage_biomass stand inventories (CASSIA_Calibration/smearII_data), kg dry mass/ha -> kg C/tree.",
+       subtitle = "1998-2022, Hyde-initialised, leaf_mass_correction = TRUE, growth_proxy_height = FALSE (diameter proxy - see needle_vigor_signal.Rmd). Points: real pine_foliage_biomass stand inventories (CASSIA_Calibration/smearII_data), kg dry mass/ha -> kg C/tree.",
        x = NULL, y = "Needle leaf_mass (kg C / tree)") +
   pub_theme
 ```
