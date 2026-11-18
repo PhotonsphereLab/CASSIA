@@ -632,6 +632,19 @@ struct Settings {
   bool height_diameter_correction = false;
   // tau_H moved to CASSIA_parameters (2026-11-09) - see final_parameters.h.
 
+  // Which one-year-lagged "vigor" signal needle growth is scaled against
+  // (growth.cpp's state.needles = m_N * GN * last_year_X / x_increment).
+  // TRUE (default, unchanged behaviour): last_year_HH, last year's total
+  // height growth. FALSE: last year's total ring width growth instead,
+  // against d_increment (final_parameters.h) in place of h_increment.
+  // Added because height_diameter_correction above damps HH directly,
+  // so last_year_HH now conflates "a weak year" with "the correction
+  // working as intended" - ring width is the correction's own
+  // uncorrected reference, so it doesn't inherit that artifact. See
+  // development_notebooks/needle_vigor_signal.Rmd for the investigation
+  // behind this switch (2026-11-20).
+  bool growth_proxy_height = true;
+
   // Makela & Valentine (2020) pipe-model correction for root growth,
   // referenced against leaf mass via the pipe model's own ratio
   // (Ch.4, Eq. 4.13: W_r = alpha_r * W_f) - see growth.cpp's root

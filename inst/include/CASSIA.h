@@ -180,6 +180,7 @@ void growth(int day,
             double GPP_previous_sum,
 
             double last_year_HH,
+            double last_year_ring_width,
             int no_day,
             double N_repo);
 

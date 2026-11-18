@@ -121,6 +121,14 @@ Rcpp::List CASSIA_yearly(int start_year,
 
   // Old
   double last_year_HH{275.4137};
+  // growth_proxy_height = FALSE's lagged vigor proxy (see growth.cpp's
+  // state.needles) - mirrors last_year_HH's own tracking exactly, just
+  // for tree_state.tot_mm (ring_width.cpp's cumulative-within-year ring
+  // width) instead of tree_state.HH. Bootstrap year-1 value is
+  // parameters.d_increment itself (ratio = 1), since unlike last_year_HH
+  // there is no real first-year observation to seed it with.
+  double last_year_ring_width{parameters.d_increment};
+  double ring_width_total = 0.0;
   double last_year_maxN = 0.0;
   double GPP_mean = 0.0;
   double HH = 0.0;
@@ -549,6 +557,7 @@ Rcpp::List CASSIA_yearly(int start_year,
              GPP_previous_sum[year-start_year],
              // Last iteration value
              last_year_HH,
+             last_year_ring_width,
              days_per_year,
              // N_repo: m_N_tot (carbon), not needle_mass (dry mass) - this
              // is compared directly against leaf_mass/state.needles
@@ -628,6 +637,7 @@ Rcpp::List CASSIA_yearly(int start_year,
 
       // TODO: what does this do?
       HH = tree_state.HH;
+      ring_width_total = tree_state.tot_mm;
       potenital_growth_use[days_gone + day] = tree_state.use;
 
       GPP_sum_yesterday = GPP_sum;
@@ -643,6 +653,7 @@ Rcpp::List CASSIA_yearly(int start_year,
     // Updating parameters!
 
     last_year_HH = HH;
+    last_year_ring_width = ring_width_total;
 
     GPP_previous_sum[year - start_year + 1] = std::accumulate(all_out.photosynthesis.GPP.begin() + days_gone + 182,
                                                               all_out.photosynthesis.GPP.begin() + days_gone + 245 + 1, 0.0);

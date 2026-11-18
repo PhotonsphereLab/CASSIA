@@ -120,6 +120,8 @@ CASSIA_parameters make_CASSIA_parameters(Rcpp::DataFrame input_parameters,
   out.n_length = temp49[0];
   std::vector<double> temp50 = input_parameters["h_increment"];
   out.h_increment = temp50[0];
+  std::vector<double> temp_d_increment = input_parameters["d_increment"];
+  out.d_increment = temp_d_increment[0];
   std::vector<double> temp51 = input_parameters["SLA"];
   out.SLA = temp51[0];
   std::vector<double> temp52 = input_parameters["LR0"];

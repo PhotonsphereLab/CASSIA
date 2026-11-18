@@ -167,7 +167,14 @@
 #'   in \code{height_correction.Rmd}/\code{nitrogen_scenarios.Rmd}) are
 #'   unaffected by this argument's default of \code{FALSE}. Does not
 #'   affect \code{root_turnover}, which is a separate litter mechanism -
-#'   see that argument's own doc. Default \code{FALSE}.
+#'   see that argument's own doc. Also forces \code{growth_proxy_height =
+#'   FALSE} (the opposite direction from the other three, since
+#'   \code{height_diameter_correction} is what makes height an unreliable
+#'   needle-growth reference in the first place - see that argument's own
+#'   doc and \code{development_notebooks/needle_vigor_signal.Rmd}); this
+#'   one similarly can't be forced back to \code{TRUE} by setting
+#'   \code{growth_proxy_height = TRUE} alongside \code{pipe_model_correction
+#'   = TRUE}. Default \code{FALSE}.
 #' @param height_diameter_correction Logical. If \code{TRUE}, height's
 #'   growth rate is damped (never boosted - capped at no correction, not
 #'   accelerated, so it never exceeds its own calibrated maximum rate)
@@ -182,6 +189,22 @@
 #'   not better. Needles, roots and bud are not corrected either (no
 #'   data-grounded reference relationship exists for them - see
 #'   \code{manuscript/paper_plan.Rmd} Working Notes). Default \code{FALSE}.
+#' @param growth_proxy_height Logical. Which one-year-lagged "vigor"
+#'   signal needle growth is scaled against (last year's total growth,
+#'   relative to a site-average reference). \code{TRUE} (default):
+#'   height growth (\code{h_increment}), unchanged behaviour. \code{FALSE}:
+#'   ring width/diameter growth instead (\code{d_increment}). Added
+#'   because \code{height_diameter_correction} above damps height
+#'   directly, so the height-based signal now conflates "a weak year"
+#'   with "the correction working as intended" over a multi-year run -
+#'   ring width is that correction's own uncorrected reference, so it
+#'   doesn't inherit the artifact. See
+#'   \code{development_notebooks/needle_vigor_signal.Rmd} for the
+#'   investigation behind this switch. Forced to \code{FALSE} whenever
+#'   \code{pipe_model_correction = TRUE} (below) - setting this argument
+#'   to \code{TRUE} alongside \code{pipe_model_correction = TRUE} does not
+#'   override that. Independent of \code{pipe_model_correction}, this
+#'   argument is left at its own default. Default \code{TRUE}.
 #' @param root_leaf_correction Logical. If \code{TRUE}, root growth is
 #'   damped (same Mäkelä 1999 eqn 28 mechanism as
 #'   \code{height_diameter_correction}, damping-only) toward a target
@@ -478,6 +501,7 @@ CASSIA_cpp <- function(
     needle_mass_grows = FALSE,		# Is needle mass dynamic i.e. the modelled growth is also respiring etc and following for some years? If true, note that root mass is related to needle mass
     pipe_model_correction = FALSE,       # Convenience shortcut: TRUE ORs height_diameter_correction, root_leaf_correction, and leaf_mass_correction all on together - the three Makela & Valentine pipe-model-family corrections. Does not turn any of them OFF if already TRUE individually, and leaves them fully independently settable - see roxygen doc
     height_diameter_correction = FALSE,  # Makela (1999) structural-balance control, damping-only, height referenced against diameter (not the reverse - see roxygen doc)
+    growth_proxy_height = TRUE,          # Needle growth's lagged vigor signal: TRUE = last year's height growth (h_increment, unchanged), FALSE = last year's ring width growth (d_increment) instead - see roxygen doc
     root_leaf_correction = FALSE,        # Makela & Valentine (2020) pipe-model control (Eq. 4.13, Wr=alpha_r*Wf), damping-only, roots referenced against leaf MASS - recomputed yearly not daily (see roxygen doc); alpha_r=0.47 is PREBAS/CROBAS's alfar3 (Scots pine, site type 3), not yet Hyde-validated
     root_turnover = FALSE,               # Root/mycorrhiza litter, driven by the same fS senescence signal as leaf area's own turnover (not a literal copy - see roxygen doc); turnover-time constant is an uncalibrated placeholder; root litter gets an extra pipe-model boost/damp when root_leaf_correction is also TRUE
     leaf_mass_correction = FALSE,        # Makela (1999) structural-balance control, damping-only, needle leaf_mass referenced against Repola's own prediction - replaces the memoryless annual-reset formula with a genuine accumulating pool, litter via fS^2 bell curve (see roxygen doc)
@@ -551,6 +575,15 @@ CASSIA_cpp <- function(
   root_leaf_correction       = root_leaf_correction       || pipe_model_correction
   leaf_mass_correction       = leaf_mass_correction       || pipe_model_correction
 
+  # growth_proxy_height goes the OTHER direction: pipe_model_correction
+  # forces it OFF (diameter), never back on, since
+  # height_diameter_correction above is exactly what makes height an
+  # unreliable needle-growth reference (development_notebooks/
+  # needle_vigor_signal.Rmd) - using the pipe-model family without this
+  # would keep feeding needle growth a signal the correction itself is
+  # damping.
+  growth_proxy_height = growth_proxy_height && !pipe_model_correction
+
   # make the model settings into a list
   settings = list(
     "storage_reset" = storage_reset,
@@ -565,6 +598,7 @@ CASSIA_cpp <- function(
     "growth_decreases" = growth_decreases,
     "needle_mass_grows" = needle_mass_grows,
     "height_diameter_correction" = height_diameter_correction,
+    "growth_proxy_height" = growth_proxy_height,
     "root_leaf_correction" = root_leaf_correction,
     "root_turnover" = root_turnover,
     "leaf_mass_correction" = leaf_mass_correction,

@@ -239,6 +239,18 @@ parameters_p[88,] <- c(4.8, NA, NA) # xi_offset_litter - added to the prior year
 # unchanged from the old hardcoded value pending that fit.
 parameters_p[89,] <- c(3, NA, NA) # root_turnover_years
 
+# Row 90 (2026-11-20): d_increment, the ring-width equivalent of
+# h_increment (row 51), for growth_proxy_height = FALSE
+# (function_structures.h, growth.cpp) - see
+# development_notebooks/needle_vigor_signal.Rmd. Hyde value (cols 1-2) is
+# the mean annual ring-width increment (mm, single radius) over the same
+# 2010-2015 window h_increment uses, from the real increment-core data
+# (CASSIA_Calibration/Processed_Data/Core Drilling 2012/2014/2016.txt,
+# years 2010-2015 pooled across all three files, N=431, mean=1.1901mm).
+# Väriö (col 3) has no equivalent core data on hand yet - placeholder,
+# reusing the Hyde value pending a real Väriö-specific fit.
+parameters_p[90,] <- c(1.1901, 1.1901, 1.1901) # d_increment, mean ring-width increment (Hyde 2010-2015; Väriö placeholder)
+
 row.names(parameters_p) <- c("Q10.N", "Rm.NR", "Q10.S", "Rm.S", "Q10.R", "Rm.R", "sR0", "sRc", "growth.myco", "root.lifetime",
 "HH0", "sH0", "LH", "LH0", "sHc", "sN0", "LN", "LN0", "sNc", "HN0", "sD0.Trad", "LD", "LD0", "sDc", "sDc.T.count",
 "tau.Ee", "tau.El", "tau.We", "tau.Wl", "tau.GPP", "Uggla", "sB0", "sBc", "LB",
@@ -251,7 +263,7 @@ row.names(parameters_p) <- c("Q10.N", "Rm.NR", "Q10.S", "Rm.S", "Q10.R", "Rm.R",
 "GPP_mean", "GPP_initial",
 "tau_H", "tau_R", "tau_N", "sLc_litter", "theta_N_needles", "theta_N_roots", "theta_N_myco",
 "retrans_needles", "retrans_roots", "retrans_myco",
-"omega_litter", "alpha_litter", "xi_offset_litter", "root_turnover_years")
+"omega_litter", "alpha_litter", "xi_offset_litter", "root_turnover_years", "d_increment")
 save(parameters_p, file = paste0(data.direct, "/parameters_p.RData"))
 
 ######

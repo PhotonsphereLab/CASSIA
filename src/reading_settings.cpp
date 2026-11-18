@@ -21,6 +21,7 @@ Settings parseSettings(Rcpp::List settingsList) {
   settings.growth_decreases = Rcpp::as<bool>(settingsList["growth_decreases"]);
   settings.needle_mass_grows = Rcpp::as<bool>(settingsList["needle_mass_grows"]);
   settings.height_diameter_correction = Rcpp::as<bool>(settingsList["height_diameter_correction"]);
+  settings.growth_proxy_height = Rcpp::as<bool>(settingsList["growth_proxy_height"]);
   settings.root_leaf_correction = Rcpp::as<bool>(settingsList["root_leaf_correction"]);
   settings.root_turnover = Rcpp::as<bool>(settingsList["root_turnover"]);
   settings.leaf_mass_correction = Rcpp::as<bool>(settingsList["leaf_mass_correction"]);

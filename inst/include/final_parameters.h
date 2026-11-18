@@ -57,6 +57,7 @@ struct CASSIA_parameters {
   double n_age;
   double n_length;
   double h_increment;
+  double d_increment; // ring-width equivalent of h_increment, for growth_proxy_height = FALSE (function_structures.h)
   double SLA;
   double LR0;
   double mycorrhiza_threshold;

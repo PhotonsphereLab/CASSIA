@@ -107,6 +107,7 @@ void growth(int day,
             double GPP_previous_sum,
 
             double last_year_HH,
+            double last_year_ring_width,
             int no_day,
             double N_repo)
 {
@@ -238,7 +239,25 @@ void growth(int day,
   double cumsum_GN = state.GN + old_GN; // TODO: should be initalised properly, but currently really really small values
   double HN = parameters.HN0 + cumsum_GN; // TODO: where does this go?
 
-  state.needles = common.m_N * state.GN * last_year_HH / parameters.h_increment;
+  // last_year_HH is meant as a one-year-lagged vigor proxy for needle
+  // growth (Schiestl-Aalto et al. 2015 eqn 4's lagged sink-demand
+  // structure), but height_diameter_correction above now damps HH
+  // directly - confirmed (development_notebooks/needle_vigor_signal.Rmd)
+  // this isn't just an occasional bad-year/correction-year mixup: over a
+  // 25-year Hyde run, the correction makes annual height growth decline
+  // monotonically (1.5x -> <0.6x of its 1998 value) with no relation to
+  // real inter-annual vigor, which state.needles below inherits
+  // wholesale as its own yearly scaling factor. Ring width (the
+  // correction's own uncorrected target) doesn't show this trend over
+  // the same run - growth_proxy_height (default TRUE, unchanged
+  // behaviour) switches between the two: TRUE keeps last_year_HH /
+  // h_increment, FALSE uses last_year_ring_width / d_increment instead.
+  // See that notebook for the comparison behind this switch.
+  if (boolsettings.growth_proxy_height) {
+    state.needles = common.m_N * state.GN * last_year_HH / parameters.h_increment;
+  } else {
+    state.needles = common.m_N * state.GN * last_year_ring_width / parameters.d_increment;
+  }
 
   // Makela (1999) structural-balance correction (2026-11-05 redesign),
   // applied DIRECTLY to state.needles - the real needle-growth demand
