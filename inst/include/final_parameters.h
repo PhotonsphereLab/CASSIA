@@ -57,6 +57,7 @@ struct CASSIA_parameters {
   double n_age;
   double n_length;
   double h_increment;
+  double d_increment; // ring-width equivalent of h_increment, for growth_proxy_height = FALSE (function_structures.h)
   double SLA;
   double LR0;
   double mycorrhiza_threshold;
@@ -162,6 +163,21 @@ struct CASSIA_parameters {
   double retrans_needles;
   double retrans_roots;
   double retrans_myco;
+
+  // Needle litter timing (2026-11-10): skew-normal over day-of-year,
+  // replacing the earlier sLc_litter/fS^2-accumulator design - see
+  // development_notebooks/leaf_mass_correction.Rmd Sect. 5.1. omega/alpha
+  // fitted once against 2006-2016 Hyytiala litter-trap data; xi_offset is
+  // added to the prior year's fS<0.5 crossing day each year (actual_growth.cpp).
+  double omega_litter;
+  double alpha_litter;
+  double xi_offset_litter;
+
+  // Root turnover time (years), actual_growth.cpp's root_turnover daily
+  // litter fraction - moved out of that file's hardcoded placeholder
+  // (2026-11-16) so it can be fit against real fine-root biomass data
+  // without recompiling; see manuscript/root_litter_fitting.
+  double root_turnover_years;
 };
 
 struct CASSIA_common {

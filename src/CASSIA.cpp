@@ -92,9 +92,9 @@ struct CassiaRun {
   weather_all climate{};
   int simulation_time{};
   output_vector all_out{};
-  needle_cohorts last_cohorts{};
-  needle_cohorts needles_cohorts{};
   double last_year_HH{};
+  double last_year_ring_width{};
+  double ring_width_total{};
   double last_year_maxN{};
   double GPP_mean{};
   double HH{};
@@ -193,9 +193,15 @@ static void cassia_init(CassiaRun& run,
   // days_per_year not defined as is later
 
   // Old
-  needle_cohorts last_cohorts{};
-  needle_cohorts needles_cohorts{};
   double last_year_HH{275.4137};
+  // growth_proxy_height = FALSE's lagged vigor proxy (see growth.cpp's
+  // state.needles) - mirrors last_year_HH's own tracking exactly, just
+  // for tree_state.tot_mm (ring_width.cpp's cumulative-within-year ring
+  // width) instead of tree_state.HH. Bootstrap year-1 value is
+  // parameters.d_increment itself (ratio = 1), since unlike last_year_HH
+  // there is no real first-year observation to seed it with.
+  double last_year_ring_width{parameters.d_increment};
+  double ring_width_total = 0.0;
   double last_year_maxN = 0.0;
   double GPP_mean = 0.0;
   double HH = 0.0;
@@ -235,7 +241,14 @@ static void cassia_init(CassiaRun& run,
   if (needle_mass_in == 0) { // The value of this should be 0 if you want the needle value to be calculated
     repola_values = repola(all_out.culm_growth.diameter[0], all_out.culm_growth.height[0], parameters);
   } else {
-    repola_values.needle_mass = needle_mass_in;
+    // needle_mass_in is documented (CASSIA_cpp.R roxygen) as kg C, so it
+    // sets m_N_tot directly - needle_mass (dry mass) is derived from it
+    // the same way repola() itself derives it (divide by carbon_share,
+    // the inverse of repola.cpp's own needle_mass*carbon_share), keeping
+    // both fields consistent regardless of which branch ran. needle_mass
+    // is still read elsewhere as dry mass (fAPAR_and_LAI.cpp's LAI calc).
+    repola_values.m_N_tot = needle_mass_in;
+    repola_values.needle_mass = needle_mass_in / parameters.carbon_share;
   }
 
   // Seed leaf_mass_correction's accumulating pool (actual_growth.cpp) at
@@ -250,7 +263,11 @@ static void cassia_init(CassiaRun& run,
   // starting from an unseeded 0.0. Harmless when leaf_mass_correction =
   // FALSE: the old fAPAR_and_LAI.cpp pathway never reads index 0 (it is
   // memoryless).
-  all_out.culm_growth.leaf_mass[0] = repola_values.needle_mass * (parameters.n_age - 1.0) / parameters.n_age;
+  // m_N_tot (carbon), not needle_mass (dry mass, repola.cpp) - leaf_mass
+  // is a carbon pool (confirmed via theta_N_needles/carbon_share's own
+  // unit logic, actual_growth.cpp), so its seed needs to match (2026-11-10
+  // fix - needle_mass is ~2x too large here, the Repola/N_repo unit bug).
+  all_out.culm_growth.leaf_mass[0] = repola_values.m_N_tot * (parameters.n_age - 1.0) / parameters.n_age;
 
   // Bootstraps C_N_year's and litter's first (day == 0, year 1)
   // computation in growth.cpp/actual_growth.cpp from this same seed,
@@ -321,6 +338,38 @@ static void cassia_init(CassiaRun& run,
   all_out.nitrogen_capacity_vector.bud[0] = 1;
   all_out.nitrogen_capacity_vector.roots[0] = 1;
 
+  // Needle litter's skew-normal xi (growth.cpp/actual_growth.cpp) needs
+  // LAST year's fS<0.5 crossing day, which doesn't exist for the very
+  // first simulated year. The weather driving fS is already fully known
+  // in advance (not real look-ahead - this is the same complete,
+  // historical input series the main loop below reads from, just read
+  // once more here first), so start_year's own crossing day can be
+  // found with a cheap, self-contained pre-pass (fS only ever depends on
+  // TAir and its own running state - fS_model(), gpp.c - never on
+  // growth/sugar/nitrogen state) and used to seed
+  // tree_state.fS_cross_day_last_year before the main loop begins. That
+  // makes the first simulated year behave exactly like every later one
+  // from day 1 onward, with no bootstrap special-casing needed in
+  // growth.cpp/actual_growth.cpp at all. Same -900 missing-data fixup
+  // and fS_temp_sum=20.0 baseline the main loop itself uses (CASSIA.cpp
+  // below), so this is deterministically identical to what the main
+  // loop would compute for these same days anyway.
+  if (boolsettings.leaf_mass_correction) {
+    double fS_temp_sum_prepass = 20.0;
+    int days_in_start_year = leap_year(start_year);
+    for (int d = 0; d < days_in_start_year; d++) {
+      if (boolsettings.preles && d > 0 && climate.TAir[d] < -900) {
+        climate.TAir[d] = climate.TAir[d - 1];
+      }
+      double fS_prepass = fS_model(&fS_temp_sum_prepass, climate.TAir[d], parGPP);
+      double doy_prepass = static_cast<double>(d) + 1.0;
+      if (doy_prepass > 150 && fS_prepass < 0.5) {
+        tree_state.fS_cross_day_last_year = doy_prepass;
+        break;
+      }
+    }
+  }
+
   /*
    * YEAR LOOP
    */
@@ -354,9 +403,9 @@ static void cassia_init(CassiaRun& run,
   run.climate = std::move(climate);
   run.simulation_time = std::move(simulation_time);
   run.all_out = std::move(all_out);
-  run.last_cohorts = std::move(last_cohorts);
-  run.needles_cohorts = std::move(needles_cohorts);
   run.last_year_HH = std::move(last_year_HH);
+  run.last_year_ring_width = std::move(last_year_ring_width);
+  run.ring_width_total = std::move(ring_width_total);
   run.last_year_maxN = std::move(last_year_maxN);
   run.GPP_mean = std::move(GPP_mean);
   run.HH = std::move(HH);
@@ -414,9 +463,9 @@ static void cassia_step(CassiaRun& run) {
   weather_all& climate = run.climate;
   int& simulation_time = run.simulation_time;
   output_vector& all_out = run.all_out;
-  needle_cohorts& last_cohorts = run.last_cohorts;
-  needle_cohorts& needles_cohorts = run.needles_cohorts;
   double& last_year_HH = run.last_year_HH;
+  double& last_year_ring_width = run.last_year_ring_width;
+  double& ring_width_total = run.ring_width_total;
   double& last_year_maxN = run.last_year_maxN;
   double& GPP_mean = run.GPP_mean;
   double& HH = run.HH;
@@ -456,8 +505,13 @@ static void cassia_step(CassiaRun& run) {
      * Daily output
      */
 
-    // TODO: think about this bit!
-    photosynthesis.fS = 0.0;
+    // photosynthesis.fS itself is no longer reset here (2026-11-10) - it's
+    // now computed fresh every day inside the day loop below, before the
+    // photosynthesis dispatch, regardless of which model is active (see
+    // fS_decoupled_from_preles_implementation_plan.md). The persistent
+    // state behind it (tree_state.fS_temp_sum) carries its own reset
+    // logic there, tied to soil_water_reset - so nothing here needs to
+    // zero it first.
     fS_reached_one = false;
     fN_reached_one = false;
 
@@ -498,14 +552,11 @@ static void cassia_step(CassiaRun& run) {
       repola_values = repola(all_out.culm_growth.diameter[index],
                              all_out.culm_growth.height[index], parameters); // Needle mass is then calculated on the net D and h values
     } else {
-      repola_values.needle_mass = needle_mass_in;
-    }
-
-    // NOTE: not used anywhere!
-    if (year > start_year) {
-      needles_cohorts.year_1 = 31.24535 / parameters.n_length * repola_values.needle_mass / 3.0;
-      needles_cohorts.year_2 = last_cohorts.year_1;
-      needles_cohorts.year_3 = last_cohorts.year_2;
+      // Same dual-field consistency as the day-0 setup above - needle_mass_in
+      // is kg C (sets m_N_tot directly); needle_mass (dry mass) derived
+      // from it for fAPAR_and_LAI.cpp's own LAI calc.
+      repola_values.m_N_tot = needle_mass_in;
+      repola_values.needle_mass = needle_mass_in / parameters.carbon_share;
     }
 
     /*
@@ -561,6 +612,22 @@ static void cassia_step(CassiaRun& run) {
        * Photosynthesis
        */
 
+      // fS (Mäkelä et al. 2004 seasonality model): computed here,
+      // unconditionally, once per day, for every photosynthesis pathway -
+      // not just preles. reset_state: soil_water_reset=TRUE (default)
+      // fires this every year, identical to the old unconditional day==0
+      // behavior preles_cpp() used to apply only to itself; FALSE fires it
+      // only on the true first day of the whole run (year==start_year),
+      // letting it carry over continuously across years instead - needed
+      // for ORCHIMIC's continuous multi-year runs
+      // (manscript_orchemic/PROJECT_INSTRUCTIONS.md). 20.0 baseline
+      // matches PRELES's own Initials_snow.S (preles_test.cpp).
+      bool preles_reset_state = (day == 0) && (boolsettings.soil_water_reset || year == start_year);
+      if (preles_reset_state) {
+        tree_state.fS_temp_sum = 20.0;
+      }
+      photosynthesis.fS = fS_model(&tree_state.fS_temp_sum, climate.TAir[days_gone + day], parGPP);
+
       double photosynthesis_per_stem = 0.0;
       if (boolsettings.photosynthesis_as_input) {
         photosynthesis.GPP = climate.Photosynthesis_IN[day + days_gone];
@@ -568,17 +635,8 @@ static void cassia_step(CassiaRun& run) {
         photosynthesis.SoilWater = 0.0;
         photosynthesis_per_stem = climate.Photosynthesis_IN[day + days_gone] / no_trees * 10000/1000;
       } else if (boolsettings.preles) {
-        // reset_state: soil_water_reset=TRUE (default) fires this every
-        // year, identical to the previous unconditional day==0 behavior;
-        // FALSE fires it only on the true first day of the whole run
-        // (year==start_year), letting preles_cpp's soil-water/snow/canopy
-        // state carry over continuously across years instead - see
-        // preles_cpp's own comment (preles_test.cpp) for which fields
-        // that actually affects. Needed for ORCHIMIC's continuous
-        // multi-year runs (manscript_orchemic/PROJECT_INSTRUCTIONS.md).
-        bool preles_reset_state = (day == 0) && (boolsettings.soil_water_reset || year == start_year);
         photosynthesis = preles_cpp(preles, day, preles_reset_state, climate.PAR[days_gone + day], climate.TAir[days_gone + day], climate.Precip[days_gone + day],
-                                    climate.VPD[days_gone + day], climate.CO2[days_gone + day], all_out.fAPAR[days_gone + day],
+                                    climate.VPD[days_gone + day], climate.CO2[days_gone + day], all_out.fAPAR[days_gone + day], photosynthesis.fS,
                                     parSite, parGPP, parET, parSnowRain, parWater, 0.0, 1);
         photosynthesis_per_stem = photosynthesis.GPP / no_trees * 10000/1000;
       } else if (boolsettings.phydro) {
@@ -694,8 +752,14 @@ static void cassia_step(CassiaRun& run) {
              GPP_previous_sum[year-start_year],
              // Last iteration value
              last_year_HH,
+             last_year_ring_width,
              days_per_year,
-             repola_values.needle_mass);
+             // N_repo: m_N_tot (carbon), not needle_mass (dry mass) - this
+             // is compared directly against leaf_mass/state.needles
+             // (growth.cpp's C_N_year and needle_cohort_mass bootstrap),
+             // both carbon pools (2026-11-10 fix - needle_mass made this
+             // target ~2x too large).
+             repola_values.m_N_tot);
 
       // Saved for the next iteration
       release[days_gone + day] = tree_state.use;
@@ -729,6 +793,7 @@ static void cassia_step(CassiaRun& run) {
                     climate.TAir[days_gone + day],
                     climate.PAR[days_gone + day],
                     photosynthesis_per_stem,
+                    climate.AvailableN[days_gone + day],
                     parameters,
                     common,
                     nitrogen_change,
@@ -767,6 +832,7 @@ static void cassia_step(CassiaRun& run) {
 
       // TODO: what does this do?
       HH = tree_state.HH;
+      ring_width_total = tree_state.tot_mm;
       potenital_growth_use[days_gone + day] = tree_state.use;
 
       GPP_sum_yesterday = GPP_sum;
@@ -784,6 +850,7 @@ static void cassia_step(CassiaRun& run) {
     // Updating parameters!
 
     last_year_HH = HH;
+    last_year_ring_width = ring_width_total;
 
     GPP_previous_sum[year - start_year + 1] = std::accumulate(all_out.photosynthesis.GPP.begin() + days_gone + 182,
                                                               all_out.photosynthesis.GPP.begin() + days_gone + 245 + 1, 0.0);
@@ -794,10 +861,6 @@ static void cassia_step(CassiaRun& run) {
 
     days_gone = days_gone + days_per_year;
 
-    last_cohorts.year_1 = needles_cohorts.year_1; // TODO: currently the growth doesn't really have an effect on this - should it?
-    last_cohorts.year_2 = needles_cohorts.year_2;
-    last_cohorts.year_3 = needles_cohorts.year_3;
-    // TODO: make it possible to make this for 5 years?
     run.year = year + 1;
     run.day = 0;
   }
@@ -954,7 +1017,7 @@ void cassia_set_forcing_cpp(SEXP run_ptr, Rcpp::List values) {
     {"T", &c.TAir}, {"TSA", &c.TSoil_A}, {"TSB", &c.TSoil_B}, {"MB", &c.Soil_Moisture},
     {"Rain", &c.Precip}, {"P", &c.Photosynthesis_IN}, {"PAR", &c.PAR}, {"PPFD", &c.PAR},
     {"PPFD_max", &c.PAR_max}, {"VPD", &c.VPD}, {"CO2", &c.CO2}, {"fAPAR", &c.fAPAR},
-    {"Nitrogen", &c.Nitrogen}, {"PA", &c.PA}, {"SWP", &c.SWP}};
+    {"Nitrogen", &c.Nitrogen}, {"AvailableN", &c.AvailableN}, {"PA", &c.PA}, {"SWP", &c.SWP}};
   const int index = cassia_days_done(*run);
   Rcpp::CharacterVector names = values.names();
   for (int i = 0; i < values.size(); i++) {

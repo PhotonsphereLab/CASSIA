@@ -46,9 +46,11 @@ CASSIA_cpp(
   needle_mass_grows = FALSE,
   pipe_model_correction = FALSE,
   height_diameter_correction = FALSE,
+  growth_proxy_height = TRUE,
   root_leaf_correction = FALSE,
   root_turnover = FALSE,
   leaf_mass_correction = FALSE,
+  cone_turnover = FALSE,
   phloem_trigger = FALSE,
   mycorrhiza = TRUE,
   root_as_Ding = TRUE,
@@ -107,6 +109,25 @@ Additional columns required by each sub-model:
     CO2 (ppm), leaf nitrogen (g m-2), atmospheric pressure (Pa),
     soil water potential (MPa) —
     \code{phydro = TRUE}}
+}
+Optional regardless of sub-model:
+\describe{
+  \item{AvailableN}{Daily soil N available for root/mycorrhizal uptake,
+    used only when \code{nitrogen_change = TRUE}. \strong{Units: g N
+    m\eqn{^{-3}}} - Franklin (2014)'s volumetric soil N availability,
+    \eqn{N_{av}}, the same quantity \code{uptake_capacity_constant},
+    \code{root_exploration} and \code{mycelial_exploration} are
+    copied from (Methods S1, eqs 1-2); \code{nitrogen_uptake()}
+    converts it to the areal quantity Franklin's final uptake step
+    needs (\eqn{N_{av}\cdot d}, \eqn{d=0.25} m effective soil depth)
+    internally. Defaults to a flat \code{0.0507} for every day when
+    absent - Korhonen et al. (2013)'s own measured N mass-balance for
+    this exact site (~19 kg N ha\eqn{^{-1}} yr\eqn{^{-1}} net release
+    of N from decomposition), converted via Franklin's 150-day
+    growing-season convention and effective soil depth \eqn{d}. A
+    real measured rate, not the standing soil N concentration the
+    previous default used; see \code{manuscript/nitrogen_uptake}
+    Sect. 1, 2, 5 for the derivation and caveats.}
 }}
 
 \item{site}{Site name for built-in parameterisations: \code{"Hyde"}
@@ -261,7 +282,14 @@ them in isolation (e.g. \code{height_diameter_correction} alone, as
 in \code{height_correction.Rmd}/\code{nitrogen_scenarios.Rmd}) are
 unaffected by this argument's default of \code{FALSE}. Does not
 affect \code{root_turnover}, which is a separate litter mechanism -
-see that argument's own doc. Default \code{FALSE}.}
+see that argument's own doc. Also forces \code{growth_proxy_height =
+FALSE} (the opposite direction from the other three, since
+\code{height_diameter_correction} is what makes height an unreliable
+needle-growth reference in the first place - see that argument's own
+doc and \code{development_notebooks/needle_vigor_signal.Rmd}); this
+one similarly can't be forced back to \code{TRUE} by setting
+\code{growth_proxy_height = TRUE} alongside \code{pipe_model_correction
+= TRUE}. Default \code{FALSE}.}
 
 \item{height_diameter_correction}{Logical. If \code{TRUE}, height's
 growth rate is damped (never boosted - capped at no correction, not
@@ -277,6 +305,23 @@ correction on top of diameter too was tested and made its fit worse,
 not better. Needles, roots and bud are not corrected either (no
 data-grounded reference relationship exists for them - see
 \code{manuscript/paper_plan.Rmd} Working Notes). Default \code{FALSE}.}
+
+\item{growth_proxy_height}{Logical. Which one-year-lagged "vigor"
+signal needle growth is scaled against (last year's total growth,
+relative to a site-average reference). \code{TRUE} (default):
+height growth (\code{h_increment}), unchanged behaviour. \code{FALSE}:
+ring width/diameter growth instead (\code{d_increment}). Added
+because \code{height_diameter_correction} above damps height
+directly, so the height-based signal now conflates "a weak year"
+with "the correction working as intended" over a multi-year run -
+ring width is that correction's own uncorrected reference, so it
+doesn't inherit the artifact. See
+\code{development_notebooks/needle_vigor_signal.Rmd} for the
+investigation behind this switch. Forced to \code{FALSE} whenever
+\code{pipe_model_correction = TRUE} (below) - setting this argument
+to \code{TRUE} alongside \code{pipe_model_correction = TRUE} does not
+override that. Independent of \code{pipe_model_correction}, this
+argument is left at its own default. Default \code{TRUE}.}
 
 \item{root_leaf_correction}{Logical. If \code{TRUE}, root growth is
 damped (same Mäkelä 1999 eqn 28 mechanism as
@@ -350,7 +395,27 @@ running total - no sticky flag, since \code{fS^2}'s steeper decline
 already discriminates a genuine autumn decline from a mid-summer
 wobble on its own; see
 \code{needle_litter_fS2_implementation_plan.md} for the validation
-behind this. Default \code{FALSE}.}
+behind this. Default \code{FALSE}. Note: needle litter's own timing
+has since moved to a skew-normal shape over day-of-year, and its
+magnitude to real needle-cohort growth rather than Repola's
+prediction directly - this doc describes the mechanism as
+originally designed; see \code{growth.cpp}/\code{actual_growth.cpp}
+for the current formula.}
+
+\item{cone_turnover}{Logical. If \code{TRUE}, cone litter
+(\code{cone_litter}/\code{culm_growth_cone_litter}) follows a
+masting cycle: standing cone biomass (\code{cone_biomass_standing})
+accumulates every year from real bud growth
+(\code{culm_growth_bud}), and every \code{n_age}-th simulated year
+the whole accumulated stock sheds as litter, spread over a fixed
+day 121-273 window (\code{actual_growth.cpp}) - a mature cone is a
+discrete unit, not a continuously-turning-over pool, so nothing is
+retained fractionally. Split out from \code{leaf_mass_correction}
+(2026-11-10) - it only ever depended on \code{culm_growth.bud}
+(always tracked) and its own state, not on that mechanism's needle
+cohorts. Masting period/shed fraction are both uncalibrated
+placeholders (period reuses \code{n_age}; fraction is 100%, not a
+dedicated parameter). Default \code{FALSE}.}
 
 \item{phloem_trigger}{Logical. If \code{TRUE}, bud burst is triggered when
 phloem sugar first drops below a threshold (requires

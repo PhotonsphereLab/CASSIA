@@ -36,10 +36,6 @@ double emergancy(double sugar, double starch, double tau_emergancy, double lower
 
 double storage_update(double alfa, double sugar, double starch, double Wala);
 
-// growth.cpp: fS^2-based needle litter bell curve (same functional form
-// as fN), used from actual_growth.cpp.
-double makela_bell_shape(double s, double sLc);
-
 // growth.cpp: symmetric Makela (1999)-style over/undershoot ratio,
 // uncapped (unlike makela_control_factor) - used from actual_growth.cpp
 // to compute litter's correction fresh each day from this year's own
@@ -132,6 +128,7 @@ void sugar_model(int day,
                  double TAir,
                  double PAR,
                  double PF,
+                 double AvailableN,
 
                  CASSIA_parameters parameters,
                  CASSIA_common common,
@@ -183,6 +180,7 @@ void growth(int day,
             double GPP_previous_sum,
 
             double last_year_HH,
+            double last_year_ring_width,
             int no_day,
             double N_repo);
 
@@ -228,7 +226,7 @@ xylogenesis_out xylogenesis(int no_day,
 // PRELES state carried from day to day (formerly static variables of preles_cpp), so that each
 // CASSIA run has its own (step API, 2026-11).
 struct preles_state {
-  double S_state = 0.0, PhenoS = 0.0, fD = 0.0, fW = 0.0, fEgpp = 0.0, gpp380 = 0.0;
+  double PhenoS = 0.0, fD = 0.0, fW = 0.0, fEgpp = 0.0, gpp380 = 0.0;
   double theta = 0.0, theta_canopy = 0.0, theta_snow = 0.0, Snowmelt = 0.0;
   double Interception = 0.0, Drainage = 0.0, etmodel = 0.0, transp = 0.0, evap = 0.0;
   double GPP = 0.0, fE = 0.0, fWE = 0.0, fPheno = 0.0;
@@ -243,6 +241,7 @@ photosynthesis_out preles_cpp(preles_state& state,
                               double D,
                               double CO2,
                               double fAPAR,
+                              double fS,
                               p1 Site_par,
                               p2 GPP_par,
                               p3 ET_par,
@@ -259,6 +258,7 @@ photosynthesis_out preles_cpp(int day,
                               double D,
                               double CO2,
                               double fAPAR,
+                              double fS,
                               p1 Site_par,
                               p2 GPP_par,
                               p3 ET_par,
@@ -414,6 +414,7 @@ struct weather_all {
   std::vector<double> Precip;
   std::vector<double> Photosynthesis_IN;
   std::vector<double> Nitrogen;
+  std::vector<double> AvailableN;
   std::vector<double> PAR;
   std::vector<double> CO2;
   std::vector<double> VPD;

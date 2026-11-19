@@ -9,6 +9,7 @@ photosynthesis_out preles_cpp(preles_state& state,
                               double D,
                               double CO2,
                               double fAPAR,
+                              double fS,
                               p1 Site_par,
                               p2 GPP_par,
                               p3 ET_par,
@@ -17,7 +18,7 @@ photosynthesis_out preles_cpp(preles_state& state,
                               double LOGFLAG,
                               int CO2model) {
   // Day-to-day state of this run (formerly static variables shared by every run in a session).
-  double &S_state = state.S_state, &PhenoS = state.PhenoS, &fD = state.fD, &fW = state.fW,
+  double &PhenoS = state.PhenoS, &fD = state.fD, &fW = state.fW,
          &fEgpp = state.fEgpp, &gpp380 = state.gpp380;
   double &theta = state.theta, &theta_canopy = state.theta_canopy, &theta_snow = state.theta_snow,
          &Snowmelt = state.Snowmelt;
@@ -31,21 +32,24 @@ photosynthesis_out preles_cpp(preles_state& state,
   // = TRUE, reset_state = day==0, identical to the old unconditional
   // behavior) or only on the true first day of the whole run
   // (soil_water_reset = FALSE, reset_state = day==0 && year==start_year) -
-  // continuous multi-year soil water/snow/canopy/temperature-sum state,
-  // needed for ORCHIMIC. theta/theta_canopy/theta_snow/S_state are the
-  // only fields here with genuine cross-day memory (confirmed against
-  // external/Rprebasso/src/gpp.c: fS_model's S has no internal annual
-  // logic at all - it's meant to run continuously forever - and
-  // fPheno_model already resets PhenoS itself via its own day-of-year
-  // check, so it doesn't depend on this reset either way); the rest
-  // (Interception/Drainage/Snowmelt/transp/evap/GPP/gpp380/fD/fW/fEgpp)
-  // are fully recomputed from each day's own inputs before being read, so
-  // whether they're zeroed here first makes no behavioral difference.
+  // continuous multi-year soil water/snow/canopy state, needed for
+  // ORCHIMIC. theta/theta_canopy/theta_snow are the only fields here with
+  // genuine cross-day memory (fPheno_model already resets PhenoS itself
+  // via its own day-of-year check, so it doesn't depend on this reset
+  // either way); the rest (Interception/Drainage/Snowmelt/transp/evap/
+  // GPP/gpp380/fD/fW/fEgpp) are fully recomputed from each day's own
+  // inputs before being read, so whether they're zeroed here first makes
+  // no behavioral difference.
+  //
+  // fS (2026-11-10): no longer computed here - it's now a shared signal
+  // (CASSIA.cpp's year loop, growth_state.fS_temp_sum) available to every
+  // photosynthesis pathway, not just this one, passed in as a parameter
+  // instead. CASSIA.cpp resets/seeds that shared state using this exact
+  // reset_state condition, so this function's own behavior is unchanged.
   if (reset_state) {
     theta=Initials_snow.SW;
     theta_canopy=Initials_snow.CW;
     theta_snow=Initials_snow.SOG;
-    S_state = Initials_snow.S;
     Snowmelt = 0.0;
     Interception = 0.0;
     Drainage = 0.0;
@@ -60,8 +64,6 @@ photosynthesis_out preles_cpp(preles_state& state,
     fW = 0.0;
     fEgpp = 0.0;
   }
-
-  double fS = fS_model(&S_state, T, GPP_par);
 
   fPheno = fPheno_model(GPP_par, T, &PhenoS, day, fS);
 
@@ -122,6 +124,7 @@ photosynthesis_out preles_cpp(int day,
                               double D,
                               double CO2,
                               double fAPAR,
+                              double fS,
                               p1 Site_par,
                               p2 GPP_par,
                               p3 ET_par,
@@ -130,7 +133,7 @@ photosynthesis_out preles_cpp(int day,
                               double LOGFLAG,
                               int CO2model) {
   static preles_state shared_state;
-  return preles_cpp(shared_state, day, reset_state, I, T, P, D, CO2, fAPAR, Site_par, GPP_par, ET_par,
+  return preles_cpp(shared_state, day, reset_state, I, T, P, D, CO2, fAPAR, fS, Site_par, GPP_par, ET_par,
                     SnowRain_par, Initials_snow, LOGFLAG, CO2model);
 }
 
@@ -190,6 +193,12 @@ Rcpp::DataFrame preles_test(Rcpp::DataFrame weather) {
   photosynthesis_out out;
   photo_out_vector out_vector;
 
+  // fS is computed here directly (not inside preles_cpp() any more -
+  // 2026-11-10, see CASSIA.cpp's year loop for the shared version used
+  // by the main model), since this standalone diagnostic export doesn't
+  // go through that dispatch.
+  double S_state = Initials_snow.S;
+
   for (int day = 0; day < days_per_year; day++) {
 
     if (day > 0) {
@@ -209,7 +218,9 @@ Rcpp::DataFrame preles_test(Rcpp::DataFrame weather) {
     double co2 = CO2[day];
     double fapar = fAPAR[day];
 
-    out = preles_cpp(day, day==0, I, T, P, D, co2, fapar,
+    double fS = fS_model(&S_state, T, GPP_par);
+
+    out = preles_cpp(day, day==0, I, T, P, D, co2, fapar, fS,
                      Site_par, GPP_par, ET_par, SnowRain_par,
                      Initials_snow, LOGFLAG, CO2Model);
 

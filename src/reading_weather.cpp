@@ -28,6 +28,30 @@ weather_all readWeatherVariables(const Rcpp::DataFrame& weather, bool spp, bool 
   weatherVariables.Nitrogen.assign(n, 0.0);
   weatherVariables.PA.assign(n, 101325.0);
   weatherVariables.SWP.assign(n, 0.0);
+  // Daily soil N available for root/mycorrhizal uptake (sugar_model.cpp's
+  // nitrogen_uptake() call) - Franklin (2014)'s Nav, g N m-3 d-1
+  // (volumetric, a RATE - NOT per kg soil or per m2 ground - see
+  // nitrogen_uptake()'s own comment). Default 0.0507 is Hyytiala real
+  // data: Korhonen et al. (2013)'s own measured N mass-balance for this
+  // exact site gives ~19 kg N ha-1 yr-1 net release of N from
+  // decomposition (their Eq. 9/Fig. 4 "Uptake" = 19 from decomposition +
+  // 7 from deposition) - converted to g N m-2 yr-1, divided by Franklin's
+  // own 150-day growing-season convention (Table S1 footnote: "all rate
+  // values refer to the growing season"), then by his effective soil
+  // depth (0.25 m): 19 kgN/ha/yr -> 1.9 gN/m2/yr -> 0.0127 gN/m2/d ->
+  // 0.0507 gN/m3/d. This replaces the previous 6.4 default, which was a
+  // *standing* extractable-N concentration (korhonen_mineral_N.csv) used
+  // as a proxy for Nav's actual definition (Table S1: "maximal N uptake
+  // per soil volume", a rate, not a pool size) - that mismatch meant 6.4
+  // implicitly assumed the whole standing pool regenerated every single
+  // day, inflating uptake ~2 orders of magnitude above Korhonen's own
+  // measured per-tree range (confirmed by re-running with both numbers,
+  // 2026-11-18). See manuscript/nitrogen_uptake Sect. 2/5 for the full
+  // derivation, and the full comparison against Korhonen's measurements.
+  weatherVariables.AvailableN.assign(n, 0.0507);
+  if (weather.containsElementNamed("AvailableN")) {
+    weatherVariables.AvailableN = Rcpp::as<std::vector<double>>(weather["AvailableN"]);
+  }
 
   if (spp) {
     weatherVariables.Photosynthesis_IN = Rcpp::as<std::vector<double>>(weather["P"]);

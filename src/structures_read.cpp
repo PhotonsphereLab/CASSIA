@@ -120,6 +120,8 @@ CASSIA_parameters make_CASSIA_parameters(Rcpp::DataFrame input_parameters,
   out.n_length = temp49[0];
   std::vector<double> temp50 = input_parameters["h_increment"];
   out.h_increment = temp50[0];
+  std::vector<double> temp_d_increment = input_parameters["d_increment"];
+  out.d_increment = temp_d_increment[0];
   std::vector<double> temp51 = input_parameters["SLA"];
   out.SLA = temp51[0];
   std::vector<double> temp52 = input_parameters["LR0"];
@@ -299,6 +301,14 @@ CASSIA_parameters make_CASSIA_parameters(Rcpp::DataFrame input_parameters,
   out.retrans_roots = temp136[0];
   std::vector<double> temp137 = input_parameters["retrans_myco"];
   out.retrans_myco = temp137[0];
+  std::vector<double> temp138 = input_parameters["omega_litter"];
+  out.omega_litter = temp138[0];
+  std::vector<double> temp139 = input_parameters["alpha_litter"];
+  out.alpha_litter = temp139[0];
+  std::vector<double> temp140 = input_parameters["xi_offset_litter"];
+  out.xi_offset_litter = temp140[0];
+  std::vector<double> temp141 = input_parameters["root_turnover_years"];
+  out.root_turnover_years = temp141[0];
 
   return out;
 }

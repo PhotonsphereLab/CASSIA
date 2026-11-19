@@ -212,13 +212,44 @@ parameters_p[75,] <- c(481.3, NA, NA) # GPP_initial
 parameters_p[76,] <- c(5, NA, NA) # tau_H - Makela (1999) eqn 28 damping exponent for height_diameter_correction; RSS-fit against real SMEAR height/diameter (1998-2022 Hyde run), see manuscript/paper_plan.Rmd Working Notes
 parameters_p[77,] <- c(5, 5, 5) # tau_R - same mechanism for root_leaf_correction; not independently calibrated, defaults to tau_H's value
 parameters_p[78,] <- c(5, 5, 5) # tau_N - same mechanism for leaf_mass_correction; not independently calibrated, defaults to tau_H/tau_R's value
-parameters_p[79,] <- c(2.163312, NA, NA) # sLc_litter - width of the fS^2-based needle litter bell curve (leaf_mass_correction), fitted against 2006-2016 Hyytiala litter-trap data
+parameters_p[79,] <- c(2.163312, NA, NA) # sLc_litter - VESTIGIAL as of 2026-11-10: width of the old fS^2-accumulator/Makela-bell needle litter mechanism, superseded by the skew-normal design (rows 86-88 below, see development_notebooks/leaf_mass_correction.Rmd Sect. 5.1). No longer read by any C++ mechanism, nor by the notebook (its fitting comparison has since been condensed to a static summary); kept purely as a record of what the skew-normal design replaced.
 parameters_p[80,] <- c(4.9, NA, NA) # theta_N_needles - needle litter N concentration (mg N/g dry mass), Korhonen et al. (2013, Biogeosciences 10:1083-1095) Table 2, Hyytiala SMEAR II 2006-2008
 parameters_p[81,] <- c(7.7, NA, NA) # theta_N_roots - fine root N concentration, Helmisaari et al. (2007), Scots pine stand near SMEAR II, quoted in Korhonen et al. (2013) Sect. 4.2
 parameters_p[82,] <- c(3.0, 3.0, 3.0) # theta_N_myco - no literature source found; generic placeholder reusing the pre-Korhonen root value
 parameters_p[83,] <- c(0.73, NA, NA) # retrans_needles - fraction of needle litter N resorbed before shedding, Korhonen et al. (2013) Sect. 3.6.2/3.6.3, Hyytiala
 parameters_p[84,] <- c(0.2, 0.2, 0.2) # retrans_roots - fine-root N concentration decline, control to fully senescent, Wojciechowska et al. (2020, Tree Physiology 40:987-1000), Populus trichocarpa - real measured value, not this site/species, applied generically
 parameters_p[85,] <- c(0.0, 0.0, 0.0) # retrans_myco - 0 by default: resorption has no clean biological analogue for a fungal symbiont's own shed tissue
+
+# Rows 86-88 (2026-11-10): needle litter's skew-normal timing, replacing
+# sLc_litter/the fS^2-accumulator mechanism above - see
+# development_notebooks/leaf_mass_correction.Rmd Sect. 5.1. omega/alpha
+# fitted once (multi-start optim(), cumulative-proportion RMSE) against
+# 2006-2016 Hyytiala litter-trap data, same procedure already used for
+# sLc_litter; xi_offset fitted the same way, 1-D optimize(). Hyde-specific
+# (NA elsewhere), matching sLc_litter's own convention - none independently
+# calibrated for Lettosuo/Vario.
+parameters_p[86,] <- c(83.3, NA, NA) # omega_litter - skew-normal scale (days)
+parameters_p[87,] <- c(-25.22, NA, NA) # alpha_litter - skew-normal shape (skewness)
+parameters_p[88,] <- c(4.8, NA, NA) # xi_offset_litter - added to the prior year's fS<0.5 crossing day to get this year's skew-normal location (days)
+
+# Row 89 (2026-11-16): root_turnover_years, moved out of actual_growth.cpp's
+# hardcoded root_turnover placeholder so it's fittable without recompiling -
+# see manuscript/root_litter_fitting (private fine-root biomass data, not
+# shareable, so the fitting notebook lives outside data-raw/). Default of 3
+# unchanged from the old hardcoded value pending that fit.
+parameters_p[89,] <- c(3, NA, NA) # root_turnover_years
+
+# Row 90 (2026-11-20): d_increment, the ring-width equivalent of
+# h_increment (row 51), for growth_proxy_height = FALSE
+# (function_structures.h, growth.cpp) - see
+# development_notebooks/needle_vigor_signal.Rmd. Hyde value (cols 1-2) is
+# the mean annual ring-width increment (mm, single radius) over the same
+# 2010-2015 window h_increment uses, from the real increment-core data
+# (CASSIA_Calibration/Processed_Data/Core Drilling 2012/2014/2016.txt,
+# years 2010-2015 pooled across all three files, N=431, mean=1.1901mm).
+# Väriö (col 3) has no equivalent core data on hand yet - placeholder,
+# reusing the Hyde value pending a real Väriö-specific fit.
+parameters_p[90,] <- c(1.1901, 1.1901, 1.1901) # d_increment, mean ring-width increment (Hyde 2010-2015; Väriö placeholder)
 
 row.names(parameters_p) <- c("Q10.N", "Rm.NR", "Q10.S", "Rm.S", "Q10.R", "Rm.R", "sR0", "sRc", "growth.myco", "root.lifetime",
 "HH0", "sH0", "LH", "LH0", "sHc", "sN0", "LN", "LN0", "sNc", "HN0", "sD0.Trad", "LD", "LD0", "sDc", "sDc.T.count",
@@ -231,7 +262,8 @@ row.names(parameters_p) <- c("Q10.N", "Rm.NR", "Q10.S", "Rm.S", "Q10.R", "Rm.R",
 "lower_bound_W", "tau_emergancy", "uk_repo", "eki_repo", "stem_no", "diameter_start_day", "xylem_start_estimate",
 "GPP_mean", "GPP_initial",
 "tau_H", "tau_R", "tau_N", "sLc_litter", "theta_N_needles", "theta_N_roots", "theta_N_myco",
-"retrans_needles", "retrans_roots", "retrans_myco")
+"retrans_needles", "retrans_roots", "retrans_myco",
+"omega_litter", "alpha_litter", "xi_offset_litter", "root_turnover_years", "d_increment")
 save(parameters_p, file = paste0(data.direct, "/parameters_p.RData"))
 
 ######

@@ -202,6 +202,7 @@ CASSIA_original <- CASSIA_cpp(
   needle_mass_in          = parameters_all$needle_mass_in,
   Throughfall             = parameters_all$Throughfall,
   photosynthesis_as_input = TRUE,
+  pipe_model_correction   = TRUE,
   CASSIA_graphs           = FALSE
 )
 ```
@@ -226,6 +227,7 @@ CASSIA_preles <- CASSIA_cpp(
   photosynthesis_as_input = FALSE,
   preles                  = TRUE,
   fAPAR_Tian              = TRUE,
+  pipe_model_correction   = TRUE,
   CASSIA_graphs           = FALSE
 )
 ```
@@ -262,6 +264,7 @@ CASSIA_phydro <- CASSIA_cpp(
   Throughfall             = parameters_all$Throughfall,
   photosynthesis_as_input = FALSE,
   phydro                  = TRUE,
+  pipe_model_correction   = TRUE,
   CASSIA_graphs           = FALSE
 )
 ```

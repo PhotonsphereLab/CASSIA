@@ -16,38 +16,47 @@ double makela_control_factor(double X_bal, double X_current, double tau) {
 }
 
 // Mirror image of makela_control_factor, for LOSS rather than growth -
-// but deliberately NOT capped the same damping-only way. Growth
-// (makela_control_factor) stays damping-only: it never exceeds the
-// calibrated baseline rate (1/n_age of N_repo/year), by design, same as
-// every other growth-rate factor in this codebase (see that function's
-// comment). Litter instead needs to move BOTH ways, by the reciprocal
-// ratio: BOOSTS (> 1) when X_current (the pool) has overgrown past
-// X_bal (N_repo) - shed faster, not just grow slower - and REDUCES
-// (< 1) when the pool is undershooting N_repo, so an already-undergrown
-// pool doesn't keep shedding at the full baseline rate while growth
-// (capped, unable to compensate by growing faster) can never catch up.
-// Without this, growth and litter both saturate at exactly the
-// baseline rate once the pool sits below N_repo, locking the whole
+// but not capped the same damping-only way. Growth (makela_control_factor)
+// stays damping-only: it never exceeds the calibrated baseline rate
+// (1/n_age of N_repo/year), by design, same as every other growth-rate
+// factor in this codebase (see that function's comment). Litter instead
+// needs to move BOTH ways, by the reciprocal ratio: BOOSTS (> 1) when
+// X_current (the pool) has overgrown past X_bal - shed faster, not just
+// grow slower - and REDUCES (< 1) when the pool is undershooting, so an
+// already-undergrown pool doesn't keep shedding at the full baseline rate
+// while growth (capped, unable to compensate by growing faster) can never
+// catch up. The history below (originally about the needle-litter use of
+// this same function, `litter_boost_year`/`litter_boost_today` -
+// superseded 2026-11-10 by the skew-normal needle-litter redesign, no
+// longer a live call site) argued for leaving the ratio fully unbounded;
+// this function's only current caller is root_leaf_correction's
+// `root_bal_boost_today` (actual_growth.cpp), where that turned out to be
+// a real bug, not just a theoretical risk: a ~13x mismatch - the entirely
+// ordinary young-stand phase where `culm_growth.roots` (seeded at a fixed
+// 2.8 kg C/tree, CASSIA.cpp) is still large relative to a leaf_mass just
+// ramping up from near-zero - raised to tau_R=5 gave a ~430,000x boost,
+// shedding 734 kg/tree of root litter from a <1 kg standing pool in a
+// single day (confirmed 2026-11-16, manuscript/root_litter_fitting/).
+// Capped at `max_boost` below as a result - generous enough for a real,
+// meaningful boost when genuinely overgrown, bounded well short of a
+// power-law blowup. No floor - undershooting still damps toward 0 freely,
+// unchanged.
+//
+// Historical reasoning for the old needle-litter call site, kept for
+// context: without this cap, growth and litter both saturate at exactly
+// the baseline rate once the pool sits below N_repo, locking the whole
 // system into a stable cycle around N_repo/n_age that can never track a
-// N_repo target that keeps rising as the tree grows (confirmed via
-// debug trace, 1998-2022: peak tracks N_repo/n_age's trend (+0.025/yr),
-// not N_repo's own (+0.076/yr) - a gap that widens from -0.12 to +1.18
-// over 25 years). No floor/ceiling here at all - X_current/X_bal raised
-// to tau is used directly, so the correction is genuinely symmetric.
+// N_repo target that keeps rising as the tree grows (confirmed via debug
+// trace, 1998-2022: peak tracks N_repo/n_age's trend (+0.025/yr), not
+// N_repo's own (+0.076/yr) - a gap that widens from -0.12 to +1.18 over
+// 25 years). That reasoning no longer has a live call site to apply to.
 double makela_loss_boost_factor(double X_bal, double X_current, double tau) {
   const double epsilon = 1e-6;
   if (X_current < epsilon || X_bal < epsilon) {
     return 1.0;
   }
-  return std::pow(X_current / X_bal, tau);
-}
-
-// Same functional form as fN (growth.cpp's needle phenology curve) -
-// zero at s=0, peaks at 1 when s=sLc^2/4, returns to zero past s=sLc^2.
-// Self-terminating by construction, no external day-count cutoff needed.
-double makela_bell_shape(double s, double sLc) {
-  if (s <= 0 || s >= sLc * sLc) return 0.0;
-  return (sLc * std::sqrt(s) - s) / (sLc * sLc / 4.0);
+  const double max_boost = 2.0;
+  return std::min(max_boost, std::pow(X_current / X_bal, tau));
 }
 
 // Tested uncapped (2026-11-04) and reverted: without makela_control_factor's
@@ -98,6 +107,7 @@ void growth(int day,
             double GPP_previous_sum,
 
             double last_year_HH,
+            double last_year_ring_width,
             int no_day,
             double N_repo)
 {
@@ -229,7 +239,25 @@ void growth(int day,
   double cumsum_GN = state.GN + old_GN; // TODO: should be initalised properly, but currently really really small values
   double HN = parameters.HN0 + cumsum_GN; // TODO: where does this go?
 
-  state.needles = common.m_N * state.GN * last_year_HH / parameters.h_increment;
+  // last_year_HH is meant as a one-year-lagged vigor proxy for needle
+  // growth (Schiestl-Aalto et al. 2015 eqn 4's lagged sink-demand
+  // structure), but height_diameter_correction above now damps HH
+  // directly - confirmed (development_notebooks/needle_vigor_signal.Rmd)
+  // this isn't just an occasional bad-year/correction-year mixup: over a
+  // 25-year Hyde run, the correction makes annual height growth decline
+  // monotonically (1.5x -> <0.6x of its 1998 value) with no relation to
+  // real inter-annual vigor, which state.needles below inherits
+  // wholesale as its own yearly scaling factor. Ring width (the
+  // correction's own uncorrected target) doesn't show this trend over
+  // the same run - growth_proxy_height (default TRUE, unchanged
+  // behaviour) switches between the two: TRUE keeps last_year_HH /
+  // h_increment, FALSE uses last_year_ring_width / d_increment instead.
+  // See that notebook for the comparison behind this switch.
+  if (boolsettings.growth_proxy_height) {
+    state.needles = common.m_N * state.GN * last_year_HH / parameters.h_increment;
+  } else {
+    state.needles = common.m_N * state.GN * last_year_ring_width / parameters.d_increment;
+  }
 
   // Makela (1999) structural-balance correction (2026-11-05 redesign),
   // applied DIRECTLY to state.needles - the real needle-growth demand
@@ -278,6 +306,11 @@ void growth(int day,
   // (C_N_year sits at exactly 1 all year regardless, confirmed via
   // isolation test - the pool never overshoots), but removes that latent
   // risk for conditions where it might.
+  // n_age_int: shared by both the needle cohorts (leaf_mass_correction)
+  // and cone litter's masting cycle (cone_turnover) below - computed
+  // once here so neither toggle depends on the other being on too.
+  int n_age_int = static_cast<int>(std::round(parameters.n_age));
+
   if (boolsettings.leaf_mass_correction && day == 0) {
     double leaf_mass_max_last_year = state.max_leaf_mass_running;
     state.C_N_year = makela_control_factor(N_repo, leaf_mass_max_last_year, parameters.tau_N);
@@ -289,7 +322,93 @@ void growth(int day,
       state.sum_degree_fL_last_year = state.sum_degree_fL_running;
     }
     state.sum_degree_fL_running = 0.0;
-    state.sL_litter = 0.0;  // fresh accumulator for the new year
+
+    // Freeze last year's fS<0.5 crossing day (only if one was actually
+    // found - otherwise keep whatever the previous value was, same
+    // bootstrap-guard pattern as sum_degree_fL_last_year above), then
+    // set this year's skew-normal location from it. fS_cross_day_last_year
+    // is pre-seeded for the very first simulated year too (CASSIA.cpp,
+    // before the year loop starts, from a pre-pass over that year's own
+    // weather) - so in practice this is always > 0 by the time this
+    // first runs, and xi_litter is valid from day 1 of every year,
+    // without needing any special-casing here.
+    if (state.fS_crossed_this_year) {
+      state.fS_cross_day_last_year = state.fS_cross_day_this_year;
+    }
+    state.fS_crossed_this_year  = false;
+    state.fS_cross_day_this_year = -1.0;
+    state.xi_litter = (state.fS_cross_day_last_year > 0)
+                         ? state.fS_cross_day_last_year + parameters.xi_offset_litter
+                         : -1.0;
+
+    // Needle age cohorts: n_age age-classes (3 Hyde, 5 Vario). First ever
+    // call seeds all of them evenly from this year's Repola target
+    // (N_repo/n_age) - no real growth history exists yet to do otherwise,
+    // same spirit as the other bootstrap guards above. Every later year:
+    // the oldest cohort (last element) is this year's shedding magnitude,
+    // read BEFORE shifting everyone else up one slot and inserting LAST
+    // year's actual real growth (out.culm_growth.needles, the same
+    // cumulative-within-year tracker needles_accumulation below already
+    // resets to 0 each day==0 - still holding LAST year's final total
+    // here, since actual_growth.cpp's reset for THIS year hasn't run yet
+    // today) as the new youngest cohort.
+    if (state.needle_cohort_mass.empty()) {
+      state.needle_cohort_mass.assign(n_age_int, N_repo / parameters.n_age);
+      // Read back from the cohort itself (same N_repo/n_age every slot,
+      // including the oldest, was just seeded with), not a separate
+      // hardcoded 0 - otherwise the bootstrap year's needle_litter stays
+      // 0 regardless of xi_litter (confirmed real: this was the actual
+      // reason 1998 = 0.0 kg/tree persisted even after fixing xi_litter's
+      // own bootstrap gap below).
+      state.needle_litter_magnitude_this_year = state.needle_cohort_mass.back();
+    } else {
+      state.needle_litter_magnitude_this_year = state.needle_cohort_mass.back();
+      int index_ref_year = days_gone + day - 1;
+      if (index_ref_year < 0) index_ref_year = 0;
+      double last_year_real_needle_growth = out.culm_growth.needles[index_ref_year];
+      for (int i = n_age_int - 1; i > 0; --i) {
+        state.needle_cohort_mass[i] = state.needle_cohort_mass[i - 1];
+      }
+      state.needle_cohort_mass[0] = last_year_real_needle_growth;
+    }
+  }
+
+  // Cone litter (masting cycle) - own toggle, independent of
+  // leaf_mass_correction/needle cohorts above (2026-11-10, split out -
+  // this never actually depended on that mechanism, see cone_turnover's
+  // own comment, function_structures.h). Standing cone biomass
+  // accumulates every year from last year's actual bud growth
+  // (out.culm_growth.bud - same per-year running total
+  // out.culm_growth.needles is, read the same way needle cohorts do
+  // above). Every n_age-th year (years_since_masting resets to 0), the
+  // WHOLE accumulated stock sheds as litter (read by actual_growth.cpp's
+  // fixed day 121-273 window) and standing drops back to 0 - mature
+  // cones are a discrete unit that eventually all fall, unlike needles'
+  // continuous age-class turnover, so there's no "retained fraction" to
+  // carry forward. Masting period reuses n_age_int (above) rather than
+  // its own hardcoded constant - no dedicated masting-period parameter
+  // exists, and n_age is already the site-specific multi-year cycle
+  // length CASSIA has (3 Hyde, 5 Vario), so this makes the period
+  // dynamic per-site instead of a second magic number to keep in sync.
+  // years_since_masting starts at 0 and increments here every year from
+  // the very first simulated year, so masting lands on simulation year
+  // n_age, 2*n_age, 3*n_age, ... unconditionally - no special
+  // first-call bootstrap is needed, since the index_ref_year_bud clamp
+  // below already yields a correctly-zero (not garbage) contribution
+  // for the very first year, when no prior year's bud growth exists yet.
+  if (boolsettings.cone_turnover && day == 0) {
+    int index_ref_year_bud = days_gone + day - 1;
+    if (index_ref_year_bud < 0) index_ref_year_bud = 0;
+    double last_year_bud_growth = out.culm_growth.bud[index_ref_year_bud];
+    state.cone_biomass_standing += last_year_bud_growth;
+    state.years_since_masting += 1;
+    if (state.years_since_masting >= n_age_int) {
+      state.cone_litter_magnitude_this_year = state.cone_biomass_standing;
+      state.cone_biomass_standing = 0.0;
+      state.years_since_masting = 0;
+    } else {
+      state.cone_litter_magnitude_this_year = 0.0;
+    }
   }
 
   if (boolsettings.leaf_mass_correction) {
@@ -498,9 +617,23 @@ void growth(int day,
   if (boolsettings.root_leaf_correction && day == 0) {
     const double alpha_r = 0.47; // PREBAS/CROBAS alfar3, Scots pine, site fertility type 3
 
+    // Below this, last year's peak leaf_mass is too small for alpha_r*leaf_mass
+    // to be a meaningful pipe-model target - without this guard, a tiny-but-
+    // nonzero target (e.g. following a leaf_mass near-collapse) sails straight
+    // past makela_control_factor/makela_loss_boost_factor's own epsilon=1e-6
+    // guard (meant only to catch literal zero), and the litter boost -
+    // deliberately uncapped, unlike the growth-side correction - explodes by
+    // many orders of magnitude (confirmed: p-hydro root_litter reached ~5e8
+    // kg/tree in one year following a leaf_mass near-collapse the year
+    // before). 0.01 kg C/tree ~ 10 g of needle carbon, i.e. effectively no
+    // canopy - treat as "no real target this year" (R_bal = 0) instead,
+    // which both helper functions' existing epsilon guard already handles
+    // safely (returns 1.0 - no correction, rather than an explosive ratio).
+    const double leaf_mass_min = 0.01;
+
     double leaf_mass_max_last_year = state.max_leaf_mass_running_for_roots;
     double roots_max_last_year = state.max_roots_running;
-    double R_bal = alpha_r * leaf_mass_max_last_year;
+    double R_bal = (leaf_mass_max_last_year > leaf_mass_min) ? alpha_r * leaf_mass_max_last_year : 0.0;
     state.C_R_year = makela_control_factor(R_bal, roots_max_last_year, parameters.tau_R);
     state.R_bal_current = R_bal; // threaded through to actual_growth.cpp's litter boost
 

@@ -1,0 +1,705 @@
+---
+title: "Needle growth's vigor signal: last year's height growth vs. ring width"
+author: "Joanna"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
+                      fig.width = 12, fig.height = 6,
+                      fig.path = "../manuscript/figures/needle_vigor_signal-")
+```
+
+## What this document does
+
+`growth.cpp`'s needle-growth demand (the real, carbon/nitrogen-costed
+signal `sugar_model.cpp` uses, not a parallel pathway) is
+
+$$\text{needles}_t = m_N \cdot GN_t \cdot \frac{HH_{\text{yr}-1}}{h_{\text{inc}}}$$
+
+`GN_t` is today's within-season phenology shape; `last_year_HH` is a
+one-year-lagged *vigor proxy* - the idea (Schiestl-Aalto et al. 2015 eqn 4's
+lagged sink-demand structure) is that needle primordia are preformed in last
+year's bud, so this year's needle growth potential should scale with how
+vigorously the tree grew last year, not this year's conditions directly.
+`h_increment` is a fixed site constant (309, Väriö 2010-2015 mean annual
+height increment) that turns `last_year_HH` into a relative-to-average
+ratio.
+
+Since 2026-11-05, `height_diameter_correction` (Mäkelä 1999's
+structural-balance control) also damps `HH` directly when simulated height
+has drifted ahead of diameter. That means a low `last_year_HH` can now mean
+either of two different things - a genuinely weak growth year, or the
+correction doing its job - and the needle-growth equation above can't tell
+them apart. This notebook checks how much that actually matters in
+practice, and whether last year's **ring width / diameter growth** would be
+a cleaner lagged vigor signal instead, since diameter is explicitly the
+correction's *uncorrected* reference (`H_bal = alpha_H * D_current`,
+`growth.cpp`) - never itself damped by it.
+
+```{r libraries}
+devtools::load_all(quiet = TRUE)
+library(ggplot2)
+library(data.table)
+library(patchwork)
+library(knitr)
+
+pub_theme <- theme_bw(base_size = 13) +
+  theme(plot.title      = element_text(face = "bold", size = 13),
+        plot.subtitle   = element_text(size = 10, colour = "grey30"),
+        panel.grid.minor = element_blank(),
+        legend.position  = "bottom")
+```
+
+---
+
+## 1  Setup
+
+Same `h0`/`D0`/weather as `height_correction.Rmd`, so this run starts at
+the same point (12m height, 1998-2022) as the notebook that originally
+validated `height_diameter_correction`.
+
+```{r setup-data}
+data_directory  <- "~/Documents/CASSIA_Calibration/Processed_Data/"
+loaded_data     <- load_data(data_directory)
+
+new_parameters  <- rep(0.5, 27)
+parameters_2015 <- initialize_parameters(calibration = FALSE, new_parameters)
+
+parameters_2015$parameters_test[c("h0"),          "Hyde"] <- 12
+parameters_2015$parameters_test[c("D0"),          "Hyde"] <- 0.1646
+parameters_2015$parameters_test[c("GPP_mean"),    "Hyde"] <- 463.8833
+parameters_2015$parameters_test[c("GPP_initial"), "Hyde"] <- 460.0
+```
+
+```{r setup-weather}
+weather_preles <- data.table::fread("~/Documents/CASSIA/data/ERA5_CASSIA_preles.csv")
+
+weather_1998_2022 <- weather_preles[
+  weather_preles$date >= as.Date("1998-01-01") &
+  weather_preles$date <= as.Date("2022-12-31"), ]
+weather_1998_2022$dates <- as.Date(weather_1998_2022$date)
+dates_1998_2022 <- weather_1998_2022$dates
+```
+
+Two runs, identical except for `height_diameter_correction` - isolates
+exactly what the correction changes about the height/vigor signal, with
+nothing else varying.
+
+```{r run-model, cache=TRUE}
+run_nitrogen <- function(height_diameter_correction) {
+  CASSIA_cpp(
+    weather                    = weather_1998_2022,
+    site                       = "Hyde",
+    pPREL                      = c(parameters_2015$pPREL, parameters_2015$N_parameters),
+    parameters                 = parameters_2015$parameters_test,
+    common                     = common_p,
+    ratios                     = ratios_p,
+    sperling                   = parameters_2015$sperling_test,
+    needle_mass_in             = 0,
+    Throughfall                = parameters_2015$Throughfall,
+    photosynthesis_as_input    = FALSE,
+    nitrogen_balance           = 25,
+    nitrogen_change            = FALSE,
+    nitrogen_contrast          = FALSE,
+    preles                     = TRUE,
+    fAPAR_Tian                 = TRUE,
+    organ_level_sugar          = FALSE,
+    needle_mass_grows          = TRUE,
+    height_diameter_correction = height_diameter_correction
+  )
+}
+
+CASSIA_uncorrected <- run_nitrogen(FALSE)
+CASSIA_corrected    <- run_nitrogen(TRUE)
+```
+
+---
+
+## 2  Annual height growth vs. annual ring width growth
+
+Neither `last_year_HH` (an internal C++ state) nor the daily `height_growth`
+output is a 1:1 reproduction of `HH` itself (`height_growth` already has
+`B0`/`CH`/`form_factor` folded in) - but the question that matters here is
+simpler than reproducing `HH` exactly: **does the correction's damping show
+up as a dip in the annual height signal that ring width doesn't share?**
+That's answerable directly from existing output columns, by comparing each
+year's total `height_growth` against that year's total `ring_width`,
+indexed to their own first year so the very different units don't matter.
+
+```{r annual-totals, cache=TRUE}
+annual_totals <- function(run, label) {
+  df <- data.frame(year = run$Growth$year,
+                    height_growth = run$Growth$height_growth,
+                    ring_width    = run$Growth$ring_width)
+  agg <- aggregate(cbind(height_growth, ring_width) ~ year, data = df, FUN = sum)
+  agg$height_index <- agg$height_growth / agg$height_growth[1]
+  agg$ring_index    <- agg$ring_width / agg$ring_width[1]
+  agg$run <- label
+  agg
+}
+
+totals_uncorrected <- annual_totals(CASSIA_uncorrected, "Uncorrected")
+totals_corrected    <- annual_totals(CASSIA_corrected, "Corrected (height_diameter_correction)")
+totals_all <- rbind(totals_uncorrected, totals_corrected)
+```
+
+```{r vigor-signal-plot, fig.height=7}
+signal_long <- rbind(
+  data.frame(year = totals_all$year, value = totals_all$height_index,
+             signal = "Annual height growth (index)", run = totals_all$run),
+  data.frame(year = totals_all$year, value = totals_all$ring_index,
+             signal = "Annual ring width growth (index)", run = totals_all$run)
+)
+
+ggplot(signal_long, aes(x = year, y = value, colour = signal)) +
+  geom_line(linewidth = 0.9) +
+  facet_wrap(~ run, ncol = 1) +
+  scale_colour_manual(name = NULL, values = c(
+    "Annual height growth (index)"     = "#1b7837",
+    "Annual ring width growth (index)" = "#762a83"
+  )) +
+  labs(title = "Candidate lagged vigor signals, indexed to their own 1998 value",
+       subtitle = "If the two signals move together, the correction isn't distorting the vigor proxy much; if they diverge, last_year_HH and a ring-width equivalent would disagree about how 'vigorous' a year was",
+       x = NULL, y = "Index (1998 = 1)") +
+  pub_theme
+```
+
+```{r vigor-signal-correlation}
+cor_uncorrected <- cor(totals_uncorrected$height_index, totals_uncorrected$ring_index)
+cor_corrected    <- cor(totals_corrected$height_index, totals_corrected$ring_index)
+cat("Correlation between the two annual signals:\n")
+cat("  Uncorrected run: ", round(cor_uncorrected, 3), "\n")
+cat("  Corrected run:   ", round(cor_corrected, 3), "\n")
+```
+
+---
+
+## 3  Comparison against the original R reference model
+
+Three copies of the pre-C++-port R implementation exist
+(`~/Downloads/model.R`, `~/Downloads/CASSIA-Varrio_J(3)/model.R`,
+`~/Documents/Original Model/model.R`) - all three use the identical
+needle-growth line:
+
+```r
+GH <- g.sH * fH * LH * soil_moisture_effect_s_growth
+HH <- HH0 + cumsum(GH)
+...
+needle.pot.growth <- m.N * GN * (max(HH) / h_increment)
+```
+
+This is **not actually a one-year lag**. `HH0` is a fixed scalar constant
+(`parameters_Varrio.R`: `HH0 <- 10`), never updated between years, and
+`GH`/`HH` are computed as full-year vectors in one vectorized pass before
+the needle line runs - so `max(HH)` is simply *that same year's own final
+cumulative height growth*, known because the R model processes a whole
+year of weather at once rather than day-by-day. Every day of a given
+year's `needle.pot.growth` uses the identical value: the total height
+growth that year eventually reaches.
+
+That's not something the C++ port could keep unchanged - `CASSIA.cpp`
+runs online, one day at a time, so October's height growth genuinely
+isn't known yet when April's needle growth is being computed. Lagging to
+*last* year's total (`last_year_HH`) is the closest causal substitute
+available in a day-by-day loop, not an arbitrary design choice -
+Sect. 0's "lagged sink-demand" framing (Schiestl-Aalto et al. 2015 eqn 4)
+describes the biological motivation for using *some* vigor proxy at all,
+not necessarily a one-year lag specifically; the R model's own version
+of that same idea uses the current year, which simulation architecture
+alone rules out for the C++ port.
+
+Two things worth noting for Sect. 0's proposed fix in that light:
+
+- The R model never references diameter/ring width for needle growth at
+  all (`grep` for pipe/Makela/ring-width terms against `model.R` returns
+  nothing) - so there's no R-model precedent either for or against the
+  ring-width swap. It would be a genuinely new design decision, not a
+  reversion to something the R model already did.
+- `h_increment` itself is inherited from the R model almost unchanged:
+  `parameters_Varrio.R`'s `h_increment <- 120.00` (Väriö) vs. the C++
+  repo's Hyde value of 309.0938 - same comment wording ("mean height
+  increment"), different site calibration. There is no R-model
+  equivalent constant for ring width to inherit the way `h_increment`
+  was - a `d_increment`-style constant would need its own calibration
+  from scratch, not a port of an existing R value.
+
+### 3.1  Running it: `tests_c++_against_R.Rmd`'s own validation harness, height vs. diameter proxy
+
+Rather than a fresh R reimplementation, this reuses
+`tests_c++_against_R.Rmd`'s existing, already-validated comparison: the
+package's stored real R-model reference output (`Hyde_daily_original`,
+Hyde 2015-2017) against `weather_original` (the same weather SPP itself
+runs on, not ERA5), with `tests = TRUE` - as that notebook already does.
+That notebook's own Sect. 2 attributes the model's one known small
+systematic mismatch - height and needle growth matching at r &asymp; 0.98
+instead of the  &ge;0.99 everything else manages - to exactly this lag
+(`max(HH)` vs `last_year_HH`).
+
+**`tests = TRUE` is not a neutral setting for this specific comparison,
+though, and the plots below are read with that in mind.** It hardcodes
+`LH` *and* `LN` to fixed per-year constants for 2016-2018
+(`growth.cpp`, two separate `if (boolsettings.tests)` blocks) chosen
+specifically so the C++ height/needle trajectories reproduce the R
+reference closely - but it does **not** touch `LD` (diameter's own rate
+parameter), which still runs through its normal `LD_estim` estimation
+either way. So `last_year_HH` (the `TRUE` setting) is built from a height
+trajectory that was deliberately hand-calibrated to match R, while
+`last_year_ring_width` (the `FALSE` setting) is built from a diameter
+trajectory that was given no such treatment - not a fair, symmetric test
+of "which signal is intrinsically the better vigor proxy," and a real risk
+that it mechanically favours `TRUE` regardless of which one is actually
+better. Sect. 3.1.7 checks this directly by rerunning with `tests = FALSE`
+(both `LH` and `LD` on equal footing, the model's normal operating mode) -
+the headline finding survives, but by a smaller margin than the
+`tests = TRUE` numbers below suggest on their own.
+
+```{r cpp-vs-r-setup, cache=TRUE}
+data("weather_original")
+data("Hyde_daily_original")
+
+weather_original$dates <- as.Date(
+  strptime(paste(rep(2015:2017, times = c(365, 366, 365)), weather_original$X),
+           format = "%Y %j"))
+
+run_tests <- function(growth_proxy_height) {
+  CASSIA_cpp(weather = weather_original, site = "Hyde", tests = TRUE,
+             growth_proxy_height = growth_proxy_height)
+}
+
+out_height <- run_tests(TRUE)
+out_diam   <- run_tests(FALSE)
+
+orig <- Hyde_daily_original[Hyde_daily_original$year %in% 2015:2017, ]
+orig$dates <- as.Date(strptime(paste(orig$year, orig$day), format = "%Y %j"))
+
+new_g_height <- out_height$Growth; new_g_height$dates <- weather_original$dates
+new_g_diam   <- out_diam$Growth;   new_g_diam$dates   <- weather_original$dates
+new_su_height <- out_height$Sugar; new_su_height$dates <- weather_original$dates
+new_su_diam   <- out_diam$Sugar;   new_su_diam$dates   <- weather_original$dates
+
+no_trees <- 1010
+three_colours <- c("Original R" = "black", "C++ height proxy" = "firebrick", "C++ diam proxy" = "#1b7837")
+
+make_triple <- function(df_height, df_diam, orig_col, cpp_col, title, y_lab = "kg C stem⁻¹ day⁻¹") {
+  df <- data.frame(
+    dates = rep(orig$dates, 3),
+    value = c(orig[[orig_col]],
+              df_height[[cpp_col]][match(orig$dates, df_height$dates)],
+              df_diam[[cpp_col]][match(orig$dates, df_diam$dates)]),
+    Model = factor(rep(names(three_colours), each = nrow(orig)), levels = names(three_colours))
+  )
+  ggplot(df, aes(x = dates, y = value, colour = Model)) +
+    geom_line(linewidth = 1.0) +
+    scale_colour_manual(values = three_colours) +
+    scale_x_date(date_breaks = "6 months", date_labels = "%b %Y") +
+    labs(title = title, x = NULL, y = y_lab, colour = NULL) +
+    theme_bw(base_size = 11) +
+    theme(plot.title = element_text(face = "bold"), legend.position = "bottom")
+}
+```
+
+#### 3.1.1  Summary metrics
+
+```{r cpp-vs-r-metrics}
+make_metric_row <- function(cpp_col, orig_col, label) {
+  om <- mean(orig[[orig_col]], na.rm = TRUE)
+  nh <- mean(new_g_height[[cpp_col]][match(orig$dates, new_g_height$dates)], na.rm = TRUE)
+  nd <- mean(new_g_diam[[cpp_col]][match(orig$dates, new_g_diam$dates)], na.rm = TRUE)
+  data.frame(Variable = label,
+             `Orig mean` = round(om, 6),
+             `C++ height mean` = round(nh, 6), `Ratio height` = round(nh / om, 4),
+             `C++ diam mean`   = round(nd, 6), `Ratio diam`    = round(nd / om, 4),
+             check.names = FALSE)
+}
+
+metrics3 <- rbind(
+  make_metric_row("bud_growth",    "bud",          "Bud growth (actual)"),
+  make_metric_row("diameter_growth","wall_daily",  "Diameter growth (actual)"),
+  make_metric_row("needle_growth", "needle_daily", "Needle growth (actual)"),
+  make_metric_row("root_growth",   "root_daily",   "Root growth (actual)"),
+  make_metric_row("height_growth", "height_daily", "Height growth (actual)"),
+  make_metric_row("bud_growth_potential",    "bud",          "Bud growth (potential)"),
+  make_metric_row("wall_growth_potential",   "wall_daily",   "Diameter growth (potential)"),
+  make_metric_row("needle_growth_potential", "needle_daily", "Needle growth (potential)"),
+  make_metric_row("roots_growth_potential",  "root_daily",   "Root growth (potential)"),
+  make_metric_row("height_growth_potential", "height_daily", "Height growth (potential)"),
+  make_metric_row("respiration_growth",      "Rg", "Respiration (growth)"),
+  make_metric_row("respiration_maintenance", "Rm", "Respiration (maintenance)")
+)
+
+kable(metrics3, align = c("l", "r", "r", "r", "r", "r"),
+      caption = "Mean values over 2015-2017; ratio = C++ / original R")
+```
+
+#### 3.1.2  Growth variables: time series
+
+```{r cpp-vs-r-growth-plots, fig.height = 16}
+g1 <- make_triple(new_g_height, new_g_diam, "bud",          "bud_growth",     "Bud growth")
+g2 <- make_triple(new_g_height, new_g_diam, "wall_daily",   "diameter_growth","Diameter (wall) growth")
+g3 <- make_triple(new_g_height, new_g_diam, "needle_daily", "needle_growth",  "Needle growth")
+g4 <- make_triple(new_g_height, new_g_diam, "root_daily",   "root_growth",    "Root growth")
+g5 <- make_triple(new_g_height, new_g_diam, "height_daily", "height_growth",  "Height growth", y_lab = "m day⁻¹")
+
+(g1 / g2 / g3 / g4 / g5) + plot_layout(ncol = 1, guides = "collect") &
+  theme(legend.position = "bottom")
+```
+
+Bud, diameter, root and height growth are structurally unaffected by
+`growth_proxy_height` (it only enters the needle line) - any visible
+difference between the two C++ lines in those four panels is purely
+indirect, via the carbon economy (Sect. 3.1.3-3.1.4). Needle growth is
+where the direct effect shows.
+
+#### 3.1.3  Carbon storage
+
+```{r cpp-vs-r-storage-plots, fig.height = 8}
+s1 <- make_triple(new_su_height, new_su_diam, "sugar",        "sugar",       "Sugar pool",    "kg C stem⁻¹")
+s2 <- make_triple(new_su_height, new_su_diam, "starch",       "starch",      "Starch pool",   "kg C stem⁻¹")
+s3 <- make_triple(new_su_height, new_su_diam, "storage_term", "storage",     "Storage term (carbon availability fraction, 0-1)", "fraction")
+
+(s1 / s2 / s3) + plot_layout(ncol = 1, guides = "collect") &
+  theme(legend.position = "bottom")
+```
+
+#### 3.1.4  GPP
+
+`growth_proxy_height` has no path into photosynthesis - GPP is computed
+upstream of growth entirely, so the two C++ lines below should be
+(and are) identical; shown for completeness/as a sanity check, not
+because a difference was expected.
+
+```{r cpp-vs-r-gpp-plot}
+gpp_df <- data.frame(
+  dates = rep(orig$dates, 3),
+  value = c(orig$P,
+            (out_height$Preles$GPP / no_trees * 10)[match(orig$dates, weather_original$dates)],
+            (out_diam$Preles$GPP / no_trees * 10)[match(orig$dates, weather_original$dates)]),
+  Model = factor(rep(names(three_colours), each = nrow(orig)), levels = names(three_colours))
+)
+
+ggplot(gpp_df, aes(x = dates, y = value, colour = Model)) +
+  geom_line(linewidth = 1.0) +
+  scale_colour_manual(values = three_colours) +
+  labs(title = "GPP per stem", x = NULL, y = "kg C stem⁻¹ day⁻¹", colour = NULL) +
+  theme_bw(base_size = 11) +
+  theme(plot.title = element_text(face = "bold"), legend.position = "bottom")
+```
+
+#### 3.1.5  Potential vs. actual growth, both settings
+
+The R model only ever computed potential growth (no carbon-storage gate) -
+this panel is C++-internal only, comparing each setting's own potential
+vs. actual needle growth (bud shown too, as the unaffected reference).
+
+```{r cpp-vs-r-pot-act-plots, fig.height = 9}
+pot_act_cols <- c("Potential" = "grey50", "Actual" = "firebrick")
+
+make_pot_act_run <- function(df, title) {
+  d <- data.frame(
+    dates = rep(df$dates, 2),
+    value = c(df$needle_growth_potential, df$needle_growth),
+    Type  = rep(c("Potential", "Actual"), each = nrow(df))
+  )
+  ggplot(d, aes(x = dates, y = value, colour = Type)) +
+    geom_line(linewidth = 1.0) +
+    scale_colour_manual(values = pot_act_cols) +
+    scale_x_date(date_breaks = "6 months", date_labels = "%b %Y") +
+    labs(title = title, x = NULL, y = "kg C stem⁻¹ day⁻¹", colour = NULL) +
+    theme_bw(base_size = 11) +
+    theme(plot.title = element_text(face = "bold"), legend.position = "bottom")
+}
+
+pa1 <- make_pot_act_run(new_g_height, "Needle growth, potential vs. actual - height proxy")
+pa2 <- make_pot_act_run(new_g_diam,   "Needle growth, potential vs. actual - diam proxy")
+
+(pa1 / pa2) + plot_layout(ncol = 1, guides = "collect") &
+  theme(legend.position = "bottom")
+```
+
+#### 3.1.6  Respiration
+
+```{r cpp-vs-r-respiration-plots, fig.height = 8}
+r1 <- make_triple(new_g_height, new_g_diam, "Rg", "respiration_growth",      "Growth respiration")
+r2 <- make_triple(new_g_height, new_g_diam, "Rm", "respiration_maintenance", "Maintenance respiration")
+
+(r1 / r2) + plot_layout(ncol = 1, guides = "collect") &
+  theme(legend.position = "bottom")
+```
+
+### 3.1.7  What this actually shows (under `tests = TRUE`)
+
+The height proxy is the closer match to the real R model here: needle
+growth (actual and potential, identical in this comparison) comes out at
+1.0100&times; the R reference with `growth_proxy_height = TRUE`, vs.
+1.0451&times; with `FALSE` - the height-proxy error is less than a
+quarter the size of the diameter-proxy's. The starch-pool plot
+(Sect. 3.1.3) shows this visibly, not just in the table: `TRUE` (red)
+sits almost exactly on the R reference (black) while `FALSE` (green)
+runs visibly lower every year. Needle growth itself (Sect. 3.1.2) looks
+nearly identical between the two settings at this resolution - the gap is
+there (the table) but small enough over three years to not read clearly
+by eye.
+
+But per the caveat above, `tests = TRUE` hand-calibrates `LH` (feeding
+`TRUE`'s signal) while leaving `LD` (feeding `FALSE`'s) on its normal
+estimation - so this 1.0% vs. 4.5% gap could just be measuring whose
+input got the special treatment, not which signal is intrinsically
+better. Sect. 3.1.8 checks that directly.
+
+### 3.1.8  Checking the confound: `tests = FALSE`
+
+Same two runs, `tests = FALSE` this time - `LH` and `LD` are both on
+their normal estimation (`LH_estim`/`LD_estim`, the model's usual
+operating mode, same as every other run in this notebook). Neither
+setting gets hand-calibrated help now.
+
+```{r cpp-vs-r-tests-false, cache=TRUE}
+out_height_nt <- CASSIA_cpp(weather = weather_original, site = "Hyde", tests = FALSE, growth_proxy_height = TRUE)
+out_diam_nt   <- CASSIA_cpp(weather = weather_original, site = "Hyde", tests = FALSE, growth_proxy_height = FALSE)
+g_h_nt <- out_height_nt$Growth; g_h_nt$dates <- weather_original$dates
+g_d_nt <- out_diam_nt$Growth;   g_d_nt$dates <- weather_original$dates
+su_h_nt <- out_height_nt$Sugar; su_h_nt$dates <- weather_original$dates
+su_d_nt <- out_diam_nt$Sugar;   su_d_nt$dates <- weather_original$dates
+
+check_cols <- c(needle_growth = "needle_daily", height_growth = "height_daily",
+                diameter_growth = "wall_daily", bud_growth = "bud", root_growth = "root_daily")
+confound_check <- do.call(rbind, lapply(names(check_cols), function(col) {
+  origcol <- check_cols[[col]]
+  nh <- mean(g_h_nt[[col]][match(orig$dates, g_h_nt$dates)], na.rm = TRUE)
+  nd <- mean(g_d_nt[[col]][match(orig$dates, g_d_nt$dates)], na.rm = TRUE)
+  om <- mean(orig[[origcol]], na.rm = TRUE)
+  data.frame(Variable = col, `Ratio height` = round(nh / om, 4), `Ratio diam` = round(nd / om, 4),
+             check.names = FALSE)
+}))
+
+kable(confound_check, align = c("l", "r", "r"),
+      caption = "tests = FALSE: both LH and LD on normal estimation, no hand-calibration either side")
+```
+
+The ordering survives: height proxy still beats diameter proxy for needle
+growth (4.6% vs. 7.2% off the R reference), and `height_growth` itself is
+now visibly off too (2.7%, vs. an exact match under `tests = TRUE`) since
+it's no longer hand-calibrated either - confirming that difference really
+was `tests = TRUE`'s doing, not a property of the underlying model.
+`diameter_growth`'s own ratio (1.0033) is identical under both `tests`
+settings, as expected (`LD` was never touched by `tests` in the first
+place). So the confound inflated the gap (1.0 vs. 4.5 under `tests = TRUE`
+narrows to 4.6 vs. 7.2 under `tests = FALSE`) but didn't fabricate the
+direction of it - height genuinely tracks the real R model's needle
+growth better than diameter does, over this three-year window, with or
+without the hand-calibration.
+
+That's still not a contradiction of Sect. 2/3's finding: this 2015-2017
+window is far too short for `height_diameter_correction`'s multi-decade
+drift to have compounded into anything visible yet (Sect. 2 needed the
+better part of two decades to show the height-based signal's monotonic
+decline). At this horizon, switching to `growth_proxy_height = FALSE`
+would trade a long-run artifact (real, but only visible over decades) for
+a smaller but real degradation in the model's short-run match to its own
+validation reference. Which trade-off is worth making depends on the run
+length anything downstream actually cares about.
+
+### 3.1.9  All three side by side: hand-calibrated height, normal height, normal diameter
+
+The three C++ variants that actually matter, on one plot each, against
+the real R reference: `tests = TRUE` + height proxy (the hand-calibrated
+best case from Sect. 3.1.1-3.1.6), `tests = FALSE` + height proxy, and
+`tests = FALSE` + diameter proxy (both normal-operation, Sect. 3.1.8).
+`tests = TRUE` + diameter proxy is left out deliberately - with `LH`
+calibrated for the height pathway but paired with the diameter-based
+reference instead, it doesn't correspond to any real operating mode.
+
+```{r cpp-vs-r-quad-setup}
+quad_colours <- c("Original R" = "black",
+                   "C++ tests=TRUE, height"  = "firebrick",
+                   "C++ tests=FALSE, height" = "#e08214",
+                   "C++ tests=FALSE, diam"   = "#1b7837")
+
+make_quad <- function(df_a, df_b, df_c, orig_col, cpp_col, title, y_lab = "kg C stem⁻¹ day⁻¹") {
+  df <- data.frame(
+    dates = rep(orig$dates, 4),
+    value = c(orig[[orig_col]],
+              df_a[[cpp_col]][match(orig$dates, df_a$dates)],
+              df_b[[cpp_col]][match(orig$dates, df_b$dates)],
+              df_c[[cpp_col]][match(orig$dates, df_c$dates)]),
+    Model = factor(rep(names(quad_colours), each = nrow(orig)), levels = names(quad_colours))
+  )
+  ggplot(df, aes(x = dates, y = value, colour = Model)) +
+    geom_line(linewidth = 1.0) +
+    scale_colour_manual(values = quad_colours) +
+    scale_x_date(date_breaks = "6 months", date_labels = "%b %Y") +
+    labs(title = title, x = NULL, y = y_lab, colour = NULL) +
+    theme_bw(base_size = 11) +
+    theme(plot.title = element_text(face = "bold"), legend.position = "bottom")
+}
+```
+
+```{r cpp-vs-r-quad-needle, fig.height = 5}
+make_quad(new_g_height, g_h_nt, g_d_nt, "needle_daily", "needle_growth", "Needle growth, all three C++ variants")
+```
+
+```{r cpp-vs-r-quad-starch, fig.height = 5}
+make_quad(new_su_height, su_h_nt, su_d_nt, "starch", "starch", "Starch pool, all three C++ variants", "kg C stem⁻¹")
+```
+
+```{r cpp-vs-r-quad-metrics}
+make_quad_row <- function(orig_col, cpp_col, label) {
+  om <- mean(orig[[orig_col]], na.rm = TRUE)
+  a  <- mean(new_g_height[[cpp_col]][match(orig$dates, new_g_height$dates)], na.rm = TRUE)
+  b  <- mean(g_h_nt[[cpp_col]][match(orig$dates, g_h_nt$dates)], na.rm = TRUE)
+  cc <- mean(g_d_nt[[cpp_col]][match(orig$dates, g_d_nt$dates)], na.rm = TRUE)
+  data.frame(Variable = label,
+             `tests=TRUE, height` = round(a / om, 4),
+             `tests=FALSE, height` = round(b / om, 4),
+             `tests=FALSE, diam` = round(cc / om, 4),
+             check.names = FALSE)
+}
+
+quad_metrics <- rbind(
+  make_quad_row("needle_daily", "needle_growth", "Needle growth"),
+  make_quad_row("height_daily", "height_growth", "Height growth"),
+  make_quad_row("wall_daily",   "diameter_growth","Diameter growth")
+)
+kable(quad_metrics, align = c("l", "r", "r", "r"),
+      caption = "Ratio to the real R reference, all three variants")
+```
+
+Reading the three against each other rather than just against R: going
+from `tests = TRUE` to `tests = FALSE` (both height proxy) is the size of
+the hand-calibration's own contribution; going from `tests = FALSE`
+height to `tests = FALSE` diameter (both normal operation) is the actual,
+uncontaminated height-vs-diameter difference this notebook is asking
+about. The starch-pool plot makes both steps visible in 2016-2017: hand-
+calibrated height (red) sits closest to R, normal-operation height
+(orange) drifts a bit further, and normal-operation diameter (green)
+drifts furthest of the three. 2015 is a cleaner read than it first looks,
+not a counterexample - `growth.cpp`'s `tests` hardcoding only has values
+for 2016-2018 (`if (year == 2016) ... else if (year == 2017) ...`), so
+`tests = TRUE` and `tests = FALSE` are *identical* for 2015 regardless of
+proxy (verified: `height_growth` matches exactly that year, diverges from
+2016 on) - the small 2015 gap visible in the plot is genuinely just
+height-vs-diameter, with no hand-calibration in play on either red or
+orange yet.
+
+---
+
+## 4  Comparison against the pipe-model mechanism
+
+CASSIA already has two live Mäkelä-style corrections -
+`height_diameter_correction` (height vs. diameter) and
+`root_leaf_correction` (roots vs. leaf mass, Mäkelä & Valentine 2020's
+pipe model, `W_r = alpha_r * W_f`). Both share one structure:
+
+```cpp
+// height_diameter_correction (growth.cpp)
+H_bal = alpha_H * D_current;                                    // independent target, from a DIFFERENT pool
+LH = LH * makela_control_factor(H_bal, H_current, parameters.tau_H);  // damp an existing rate toward it, capped at 1
+
+// root_leaf_correction (growth.cpp)
+R_bal = alpha_r * leaf_mass_max_last_year;                       // independent target, from a DIFFERENT pool
+GR = GR * state.C_R_year;                                        // damp an existing rate toward it, capped at 1
+```
+
+Both are **damping corrections**: an organ's own growth-rate term gets
+multiplied by a capped ratio of "where it should be" vs. "where it
+is" - two pools cross-checked against each other via an allometric
+constant (`alpha_H`, `alpha_r`), never swapping which pool drives a
+*different* organ's growth demand.
+
+Plainly: `height_diameter_correction` is making simulated height smaller
+every year it's active (Sect. 2-3), and needle growth is still referencing
+that shrinking height as its vigor signal - so the needle-growth formula
+should reference diameter instead, which the correction never touches.
+Fixing this changes the standing needle mass pool, not just the daily
+growth flux (`leaf_mass_correction` is what turns `state.needles` into a
+real accumulating pool, `leaf_mass`, rather than a memoryless annual-reset
+value) - the plot below is the same style as Sect. 2, now tracking
+`leaf_mass` (kg C/tree) instead of `needle_growth` (kg C/day).
+
+For completeness: this swap isn't technically a third pipe-model
+correction like the other two. `height_diameter_correction`/
+`root_leaf_correction` both damp an organ's own growth rate toward an
+independent target from a *different* pool, capped at 1
+(`makela_control_factor`). `last_year_HH` isn't a target needle growth is
+checked against - it's multiplied directly into `state.needles`' formula,
+uncapped - so swapping it for a ring-width equivalent is a same-family
+substitution (which lagged scalar feeds the formula), not a new
+correction needing its own cap. The closest *existing* needle-side
+Mäkelä correction is actually `leaf_mass_correction` itself (checks
+`state.needles` against Repola's own `N_repo` target) - a real
+pipe-model-shaped comparison for needles already exists, just not tied
+to height or diameter.
+
+```{r proxy-switch-leafmass, cache=TRUE}
+run_proxy_leafmass <- function(growth_proxy_height) {
+  CASSIA_cpp(
+    weather                    = weather_1998_2022,
+    site                       = "Hyde",
+    pPREL                      = c(parameters_2015$pPREL, parameters_2015$N_parameters),
+    parameters                 = parameters_2015$parameters_test,
+    common                     = common_p,
+    ratios                     = ratios_p,
+    sperling                   = parameters_2015$sperling_test,
+    needle_mass_in             = 0,
+    Throughfall                = parameters_2015$Throughfall,
+    photosynthesis_as_input    = FALSE,
+    nitrogen_balance           = 25,
+    nitrogen_change            = FALSE,
+    nitrogen_contrast          = FALSE,
+    preles                     = TRUE,
+    fAPAR_Tian                 = TRUE,
+    organ_level_sugar          = FALSE,
+    needle_mass_grows          = TRUE,
+    height_diameter_correction = TRUE,
+    leaf_mass_correction       = TRUE,
+    growth_proxy_height        = growth_proxy_height
+  )
+}
+
+CASSIA_leafmass_height <- run_proxy_leafmass(TRUE)
+CASSIA_leafmass_diam    <- run_proxy_leafmass(FALSE)
+
+leafmass_long <- rbind(
+  data.frame(dates = dates_1998_2022, value = CASSIA_leafmass_height$Growth$leaf_mass,
+             proxy = "growth_proxy_height = TRUE (current)"),
+  data.frame(dates = dates_1998_2022, value = CASSIA_leafmass_diam$Growth$leaf_mass,
+             proxy = "growth_proxy_height = FALSE (ring width)")
+)
+```
+
+```{r proxy-switch-leafmass-plot, fig.height=5}
+ggplot(leafmass_long, aes(x = dates, y = value, colour = proxy)) +
+  geom_line(linewidth = 0.7) +
+  scale_colour_manual(name = NULL, values = c(
+    "growth_proxy_height = TRUE (current)"     = "#1b7837",
+    "growth_proxy_height = FALSE (ring width)" = "#762a83"
+  )) +
+  scale_x_date(date_breaks = "5 years", date_labels = "%Y") +
+  labs(title = "Needle leaf_mass pool, both switch settings",
+       subtitle = "Hyde 1998-2022, leaf_mass_correction = TRUE throughout (so leaf_mass is a real accumulating pool, not memoryless) - tracking the standing pool instead of the daily growth flux",
+       x = NULL, y = "Needle leaf_mass (kg C / tree)") +
+  pub_theme
+```
+
+The standing pool shows the same artifact as Sect. 2, just more visibly
+because it accumulates: the two settings start close together (both
+~1.4kg C in 1998) and track each other reasonably while the correction
+isn't yet biting hard, with `TRUE` actually running slightly *higher*
+than `FALSE` through roughly 2008. Past that point `TRUE` collapses -
+by 2022 its seasonal peaks have fallen from ~2kg C to under 0.4kg C, a
+decline `FALSE` never shows (it keeps the same roughly 1-2kg C seasonal
+range throughout). So this isn't "one setting is always lower" - it's
+that `TRUE`'s long-run decline (Sect. 2) only properly shows up in the
+standing pool once it's had enough years to compound, which a snapshot
+at any single early year would miss entirely. Whichever proxy is used
+changes how much standing leaf mass the tree ends up carrying by 2022 -
+directly relevant to anything downstream that reads `leaf_mass`
+(fAPAR/LAI, the litter mechanisms in Sect. 1-3 of the Pauliina deck,
+ORCHIMIC's C/N-split litter).
+

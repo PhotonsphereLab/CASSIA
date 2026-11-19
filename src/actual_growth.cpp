@@ -115,20 +115,36 @@ void actual_growth(int day,
   // Culmulative
   all_out.culm_growth.height[days_gone + day]   = all_out.culm_growth.height[index_ref] + tree_state.height;
 
-  // Root/mycorrhiza turnover (litter): same senescence SIGNAL as leaf
-  // area's cohort turnover (fAPAR_and_LAI.cpp, Tian 2021) - photosynthesis.fS,
-  // sticky once it first reaches 1.0 after day 50 (fS_reached_one_roots),
-  // tracking fS's own decline from then on. Deliberately NOT a literal
-  // copy of the needle formula though: that formula's flat (n_age-1)/n_age
-  // daily decay only stays sensible because it is paired with an equally
-  // large, phenology-driven regrowth term (f_modifer) that has no root
-  // equivalent here - transplanting it as-is would drain the pool during
-  // every zero-growth winter day. Using today's actual realized growth
-  // (tree_state.roots/.ecto, already correct - see the previous commit)
-  // as the replacement term instead, and turning the senescence signal
-  // into a DEGREE of senescence (1 - fS) so loss is ~0 except during the
-  // real autumn decline, scaled by a per-day rate derived from a
-  // turnover-time placeholder (see root_turnover_years below).
+  // day is 0-indexed here (day==0 is Jan 1); day_of_year is converted to
+  // the 1-indexed convention (1-366) the R-side fit used - shared by
+  // root_turnover's own fixed-window spread immediately below,
+  // leaf_mass_correction's needle litter, and cone_turnover's cone litter
+  // further down, none of which depend on either of the others being on.
+  double day_of_year = static_cast<double>(day) + 1.0;
+
+  // Root/mycorrhiza turnover (litter): per-day rate is a flat
+  // (1/root_turnover_years)/183 fraction of the standing pool within a
+  // fixed day 121-303 (1 May - 30 Oct) window, zero outside - mirrors
+  // cone_turnover's own fixed-window spread below. Previously scaled by
+  // a senescence DEGREE derived from photosynthesis.fS (leaf area's own
+  // cohort-turnover signal, fAPAR_and_LAI.cpp); replaced (2026-11-16)
+  // because that borrowed signal had no empirical support for root
+  // litter *timing* specifically - the one study found that measured
+  // Scots pine fine-root necromass seasonally (Makkonen & Helmisaari
+  // 1998, For. Ecol. Manage. 102:283-290) found no distinct within-year
+  // pattern across four growing seasons, the same "fitting a shape just
+  // chases noise" conclusion cone_turnover's own window already reached
+  // for masting. The 121-303 window instead comes from Ding et al.
+  // (2020, Tree Physiology 40:272-283, same site network): measured
+  // Scots pine root elongation starts May-Aug and stops by day 303 every
+  // year - a growth-phenology window, not a death-phenology one (no
+  // paper measured that directly), so this is still a simplification,
+  // not a validated shape; see manuscript/root_litter_fitting/
+  // root_litter_fitting.Rmd for the full literature write-up and
+  // caveats. Spreading the annual total (1/root_turnover_years) evenly
+  // over the window also matches how the source literature itself
+  // defines fine-root litter production (FRB / longevity-in-years), see
+  // that notebook's Sect. 3.1.
   //
   // NOTE: parameters.root_lifetime looks like the natural rate to reuse
   // here (same role as n_age plays for needles) but is NA for this site's
@@ -136,19 +152,14 @@ void actual_growth(int day,
   // root_as_Ding == FALSE branch, which nothing in this session's runs
   // exercises (root_as_Ding defaults TRUE). Using it as-is would silently
   // NaN the whole run the moment root_turnover is enabled, so a separate,
-  // explicitly-flagged placeholder is used instead until root_lifetime
-  // itself is actually populated/validated.
-  if (day == 0) {
-    tree_state.fS_reached_one_roots = false;
-  }
-  if (photosynthesis.fS >= 1.0 && day > 50) {
-    tree_state.fS_reached_one_roots = true;
-  }
-  double root_senescence_degree = tree_state.fS_reached_one_roots ? (1.0 - photosynthesis.fS) : 0.0;
-
+  // real parameter (root_turnover_years, moved out of this file 2026-11-16
+  // so it's fittable without recompiling - see manuscript/root_litter_fitting)
+  // is used instead until root_lifetime itself is actually populated/validated.
   if (boolsettings.root_turnover) {
-    const double root_turnover_years = 3.0; // TODO: placeholder (matches n_age's default) - needs real calibration, and ideally parameters.root_lifetime once that's actually populated
-    double daily_turnover_fraction = root_senescence_degree / (root_turnover_years * 365.0);
+    double daily_turnover_fraction = 0.0;
+    if (day_of_year >= 121.0 && day_of_year <= 303.0) {
+      daily_turnover_fraction = (1.0 / parameters.root_turnover_years) / 183.0;
+    }
 
     // Pipe-model litter boost (mirrors needle litter's litter_boost_today,
     // growth.cpp's makela_loss_boost_factor): symmetric, uncapped ratio of
@@ -180,8 +191,13 @@ void actual_growth(int day,
     all_out.root_litter[days_gone+day]       = root_litter_today;
     all_out.mycorrhiza_litter[days_gone+day] = myco_litter_today;
 
-    double root_litter_N_gross = parameters.theta_N_roots / parameters.carbon_share * root_litter_today;
-    double myco_litter_N_gross = parameters.theta_N_myco  / parameters.carbon_share * myco_litter_today;
+    // theta_N_* are stored as mg N / g dry mass (e.g. 7.7, 3.0) - divide by
+    // 1000 to get the kg N / kg dry mass fraction this formula needs. Missing
+    // this conversion inflated all litter N output 1000x (found 2026-11-18,
+    // manuscript/nitrogen_uptake Sect. "Open items" - litter N was 2-3 orders
+    // of magnitude above real reference rows even after biomass settled).
+    double root_litter_N_gross = parameters.theta_N_roots / 1000.0 / parameters.carbon_share * root_litter_today;
+    double myco_litter_N_gross = parameters.theta_N_myco  / 1000.0 / parameters.carbon_share * myco_litter_today;
     root_litter_N_retrans = root_litter_N_gross * parameters.retrans_roots;
     myco_litter_N_retrans = myco_litter_N_gross * parameters.retrans_myco;
     all_out.root_litter_N[days_gone+day]       = root_litter_N_gross - root_litter_N_retrans;
@@ -200,56 +216,68 @@ void actual_growth(int day,
   // (growth.cpp's tree_state.needles in - the real, Makela-reduced and
   // sugar/nitrogen-gated needle growth demand, see that file's comment -
   // senescence-driven litter out) instead of fAPAR_and_LAI.cpp's
-  // memoryless, annually-reset formula. Litter timing uses fS^2 (not fS)
-  // with a bell-curve accumulator, no sticky flag needed - see
-  // needle_litter_fS2_implementation_plan.md for the validation behind
-  // this (fixes both the old formula's 124-day dormant-season litter
-  // smear and its mid-summer wobble false triggers).
+  // memoryless, annually-reset formula. Litter timing is a skew-normal
+  // density over day-of-year (2026-11-10, replacing the earlier
+  // fS^2-accumulator-plus-Makela-bell design) - see
+  // development_notebooks/leaf_mass_correction.Rmd Sect. 5.1 for the
+  // comparison behind this choice (validation RMSE 0.068 vs. 0.153 for
+  // the old mechanism) and needle_litter_fS2_implementation_plan.md for
+  // why that older mechanism itself existed (fixed a 124-day
+  // dormant-season smear and mid-summer-wobble false triggers in an even
+  // earlier, pre-fS^2 formula).
   if (boolsettings.leaf_mass_correction) {
-    // day is 0-indexed here (day==0 is Jan 1) - the R exploration used
-    // 1-indexed day_vec>212, i.e. day>=212 in 0-indexed terms. No sticky
-    // flag needed: fS^2's steeper decline already discriminates real
-    // autumn from a mid-summer wobble on its own (confirmed: the wobble's
-    // fS~0.83-0.87 gives fS^2~0.69-0.76, nowhere near triggering).
-    double fS_sq = photosynthesis.fS * photosynthesis.fS;
-    double degree = (day >= 212) ? std::max(0.0, 1.0 - fS_sq) : 0.0;
 
-    tree_state.sL_litter += degree;
-    double rate_unnormalized = degree * makela_bell_shape(tree_state.sL_litter, parameters.sLc_litter);
+    // Detect the first day this year fS drops below 0.5 (searched only
+    // after day_of_year 150, to skip the mid-summer wobble - fS sitting
+    // at ~0.83-0.87 for 2-3 weeks some years - which a threshold close to
+    // 1.0 would catch instead of the real autumn decline; only fS<0.5
+    // reliably lands on it, confirmed in the Sect. 5.1 comparison).
+    // Frozen at day==0 (growth.cpp) into fS_cross_day_last_year/
+    // xi_litter for NEXT year's use - this year's own crossing can't be
+    // known yet this early in a forward, day-by-day simulation. The very
+    // first simulated year is pre-seeded (CASSIA.cpp, before the year
+    // loop starts) with its own real crossing day from a pre-pass over
+    // its own weather, so it needs no special-casing here at all - every
+    // year, including the first, already has a valid xi_litter from
+    // day 1 onward by the time this runs.
+    if (!tree_state.fS_crossed_this_year && day_of_year > 150 && photosynthesis.fS < 0.5) {
+      tree_state.fS_crossed_this_year = true;
+      tree_state.fS_cross_day_this_year = day_of_year;
+    }
+
+    // Skew-normal density: xi_litter (growth.cpp, from last year's
+    // crossing day + parameters.xi_offset_litter), omega_litter/
+    // alpha_litter fixed (fitted once against 2006-2016 Hyytiala
+    // litter-trap data, see the Rmd Sect. 5.1). xi_litter stays -1 until
+    // a prior year's crossing exists (bootstrap first year), giving 0
+    // litter that year - same behaviour the sum_degree_fL_last_year<=1e-6
+    // guard below already gave the old mechanism.
+    double rate_unnormalized = 0.0;
+    if (tree_state.xi_litter > 0) {
+      double z = (day_of_year - tree_state.xi_litter) / parameters.omega_litter;
+      double skew_density = (2.0 / parameters.omega_litter)
+                             * (1.0 / std::sqrt(2.0 * M_PI)) * std::exp(-0.5 * z * z)
+                             * 0.5 * (1.0 + std::erf(parameters.alpha_litter * z / std::sqrt(2.0)));
+      rate_unnormalized = skew_density;
+    }
     tree_state.sum_degree_fL_running += rate_unnormalized;
 
-    // One-year-lagged self-normalization. First simulated year: no
+    // One-year-lagged self-normalization - unchanged from the old
+    // mechanism (function_structures.h). First simulated year: no
     // prior-year total yet, hold at 0.
+    //
+    // Magnitude (2026-11-10): the oldest needle cohort's real, tracked
+    // mass (growth.cpp - the actual sugar/N-gated growth from n_age years
+    // ago, not the N_repo allometric target), frozen at this year's
+    // day==0 into needle_litter_magnitude_this_year. Replaces the old
+    // N_repo_current/n_age * litter_boost_today correction entirely - the
+    // cohort mass is already a real, bounded quantity (it can't shed more
+    // than was actually grown that year), so the over/undershoot
+    // correction that target-based approach needed no longer applies.
     double needle_litter_today = 0.0;
     if (tree_state.sum_degree_fL_last_year > 1e-6) {
-      // Scaled against N_repo (this year's fixed Repola target), not the
-      // moving leaf_mass pool itself - leaf_mass[index_ref] would make a
-      // pool that has already drifted above target shed proportionally
-      // MORE just because it's bigger, reinforcing the drift rather than
-      // correcting it. N_repo/n_age is the actual target annual turnover.
-      //
-      // litter_boost_today (growth.cpp's makela_loss_boost_factor) links
-      // litter to the same over/undershoot signal that scales growth
-      // (growth.cpp's C_N_year): > 1 when this year's peak has overgrown
-      // past N_repo (shed faster), < 1 when it's undershooting (shed
-      // slower). Computed fresh here each day from THIS year's own
-      // max_leaf_mass_running (not frozen at day == 0 from last year's) -
-      // see growth.cpp's comment on why a once-per-year, last-year value
-      // is an unstable one-year-lagged feedback signal. Also tried
-      // (2026-11-05, on request): holding this flat at 1.0 with growth's
-      // correction left as the only one - that correction never actually
-      // triggers without this, since the peak then never overshoots
-      // N_repo, reducing to the original N_repo/n_age-amplitude limit
-      // cycle (gap widens to +1.1 over 25 years, same as before any of
-      // this session's fixes). This correction is load-bearing, not
-      // redundant with growth's own. Referencing the winter stock
-      // (running minimum) instead of the peak was also tried and made
-      // things worse, not better - see function_structures.h's comment.
-      double litter_boost_today = makela_loss_boost_factor(
-        tree_state.N_repo_current, tree_state.max_leaf_mass_running, parameters.tau_N);
-      needle_litter_today = (tree_state.N_repo_current / parameters.n_age)
-                             * rate_unnormalized / tree_state.sum_degree_fL_last_year
-                             * litter_boost_today;
+      needle_litter_today = tree_state.needle_litter_magnitude_this_year
+                             * rate_unnormalized / tree_state.sum_degree_fL_last_year;
     }
 
     all_out.culm_growth.leaf_mass[days_gone+day] = std::max(0.0, all_out.culm_growth.leaf_mass[index_ref] - needle_litter_today + tree_state.needles);
@@ -257,7 +285,8 @@ void actual_growth(int day,
     all_out.culm_growth.needle_litter[days_gone+day] = all_out.culm_growth.needle_litter[index_ref] + needle_litter_today;
     all_out.needle_litter[days_gone+day] = needle_litter_today;
 
-    double needle_litter_N_gross = parameters.theta_N_needles / parameters.carbon_share * needle_litter_today;
+    // theta_N_needles is mg N / g dry mass - same /1000 fix as root/myco above.
+    double needle_litter_N_gross = parameters.theta_N_needles / 1000.0 / parameters.carbon_share * needle_litter_today;
     needle_litter_N_retrans = needle_litter_N_gross * parameters.retrans_needles;
     all_out.needle_litter_N[days_gone+day] = needle_litter_N_gross - needle_litter_N_retrans;
 
@@ -269,6 +298,26 @@ void actual_growth(int day,
     if (!tree_state.needle_growth_season_ended) {
       tree_state.max_leaf_mass_running = std::max(tree_state.max_leaf_mass_running, all_out.culm_growth.leaf_mass[days_gone+day]);
     }
+  }
+
+  // Cone litter (masting cycle) - own toggle, independent of
+  // leaf_mass_correction above (2026-11-10, split out - see
+  // cone_turnover's own comment, function_structures.h). Magnitude set
+  // in growth.cpp's day==0 block: this year's whole
+  // cone_litter_magnitude_this_year (0 except masting years) spread
+  // evenly over a fixed day 121-273 window, not a fitted continuous
+  // shape - RMSE-fitting a cone window was found to be meaningless for a
+  // masting process (leaf_mass_correction.Rmd Sect. 5.2: it just
+  // inflates duration chasing masting noise), so this reuses that
+  // section's own fixed-window choice directly.
+  if (boolsettings.cone_turnover) {
+    double cone_litter_today = 0.0;
+    if (day_of_year >= 121.0 && day_of_year <= 273.0) {
+      cone_litter_today = tree_state.cone_litter_magnitude_this_year / 153.0;
+    }
+    all_out.cone_litter[days_gone+day] = cone_litter_today;
+    all_out.cone_litter_N[days_gone+day] = 0.0;  // no N model for cones yet
+    all_out.culm_growth.cone_litter[days_gone+day] = all_out.culm_growth.cone_litter[index_ref] + cone_litter_today;
   }
 
   // Credit for sugar_model.cpp's nitrogen_balance update, read on the
@@ -297,6 +346,15 @@ void actual_growth(int day,
     all_out.culm_growth.needles[days_gone+day] = 0.0;
   } else {
     all_out.culm_growth.needles[days_gone+day] = all_out.culm_growth.needles[index_ref] + tree_state.needles;
+  }
+
+  // Bud accumulation - same lifetime-running-total pattern as needles
+  // above, of the day's actual (resource-gated, line 58) bud growth.
+  // culm_growth.bud was declared but never written anywhere until now.
+  if (day == 0) {
+    all_out.culm_growth.bud[days_gone+day] = 0.0;
+  } else {
+    all_out.culm_growth.bud[days_gone+day] = all_out.culm_growth.bud[index_ref] + tree_state.bud;
   }
 
   /*
